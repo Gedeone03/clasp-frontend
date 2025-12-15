@@ -1,0 +1,192 @@
+/* ----------------------------------------------------------
+   TIKO — UI 2.0 (Neon Soft Theme)
+   Palette ufficiale & reset stile
+---------------------------------------------------------- */
+
+/* FONT */
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@300;400;600;700;800&display=swap');
+
+:root {
+  /* PALETTE PRINCIPALE */
+  --tiko-purple: #7A29FF;
+  --tiko-blue: #3ABEFF;
+  --tiko-magenta: #FF38B8;
+  --tiko-mint: #1DE2B1;
+
+  --tiko-bg-dark: #0C0C0C;
+  --tiko-bg-gray: #181A20;
+  --tiko-bg-card: #1F1F28;
+
+  --tiko-text: #FFFFFF;
+  --tiko-text-dim: #C8C8C8;
+
+  /* GLOW SOFT */
+  --tiko-glow: 0 0 12px rgba(122, 41, 255, 0.4);
+  --tiko-glow-blue: 0 0 14px rgba(58, 190, 255, 0.55);
+  --tiko-glow-magenta: 0 0 14px rgba(255, 56, 184, 0.55);
+  --tiko-hover: rgba(255,255,255,0.08);
+
+  /* RAGGI */
+  --tiko-radius: 14px;
+  --tiko-radius-lg: 22px;
+  --tiko-radius-sm: 8px;
+}
+
+/* RESET BASE */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: Nunito, sans-serif;
+}
+
+body {
+  background: var(--tiko-bg-dark);
+  color: var(--tiko-text);
+  overflow: hidden;
+}
+
+/* SCROLLBAR NEON SOFT */
+::-webkit-scrollbar {
+  width: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #111;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--tiko-purple);
+  border-radius: 12px;
+  box-shadow: var(--tiko-glow);
+}
+
+/* LINK */
+a {
+  color: var(--tiko-blue);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--tiko-magenta);
+}
+
+/* INPUTS */
+input, textarea, select {
+  background: var(--tiko-bg-gray);
+  border: 1px solid #333;
+  color: var(--tiko-text);
+  border-radius: var(--tiko-radius-sm);
+  padding: 10px 12px;
+  outline: none;
+  transition: 0.2s;
+}
+
+input:focus,
+textarea:focus,
+select:focus {
+  border-color: var(--tiko-purple);
+  box-shadow: var(--tiko-glow);
+}
+
+/* BUTTONS */
+button {
+  cursor: pointer;
+  padding: 10px 16px;
+  border: none;
+  border-radius: var(--tiko-radius-sm);
+  background: var(--tiko-purple);
+  color: white;
+  font-weight: 700;
+  transition: 0.2s;
+}
+
+button:hover {
+  background: #8d43ff;
+  box-shadow: var(--tiko-glow);
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* CARD */
+.tiko-card {
+  background: var(--tiko-bg-card);
+  padding: 16px;
+  border-radius: var(--tiko-radius);
+  box-shadow: 0 0 8px rgba(0,0,0,0.35);
+  transition: 0.25s;
+}
+
+.tiko-card:hover {
+  box-shadow: var(--tiko-glow-blue);
+}
+
+/* NEON TITLE */
+.tiko-title {
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: 1px;
+  color: var(--tiko-text);
+  text-shadow: var(--tiko-glow);
+}
+
+/* PILL / CHIP */
+.tiko-chip {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  background: var(--tiko-blue);
+  color: white;
+  font-size: 13px;
+  margin: 3px;
+  box-shadow: var(--tiko-glow-blue);
+}
+
+/* AVATAR PLACEHOLDER (TIKO STYLE) */
+.tiko-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: linear-gradient(140deg, var(--tiko-purple), var(--tiko-blue));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  color: white;
+  text-shadow: var(--tiko-glow);
+}
+
+/* HOVER GRADIENT LIST ITEM */
+.tiko-hover-item:hover {
+  background: var(--tiko-hover);
+}
+
+/* SPLIT LAYOUT (HOME PAGE) */
+.tiko-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background: var(--tiko-bg-dark);
+}
+
+/* SIDEBAR */
+.tiko-sidebar {
+  width: 300px;
+  background: var(--tiko-bg-gray);
+  border-right: 1px solid #222;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+}
+
+/* CONTENT */
+.tiko-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: var(--tiko-bg-dark);
+}
+
