@@ -1,10 +1,20 @@
 // src/components/ui/Sidebar.tsx
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../AuthContext";
 import { fetchFriendRequestsReceived } from "../../api";
 import { useI18n } from "../../LanguageContext";
+
+function useIsMobile(breakpointPx: number = 900) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [breakpointPx]);
+  return isMobile;
+}
 
 function StatusDot({ state }: { state: string }) {
   const colors: Record<string, string> = {
@@ -15,7 +25,6 @@ function StatusDot({ state }: { state: string }) {
     INVISIBILE: "#BDBDBD",
     VISIBILE_A_TUTTI: "#2196F3",
   };
-
   return (
     <span
       style={{
@@ -30,50 +39,14 @@ function StatusDot({ state }: { state: string }) {
   );
 }
 
-function formatMood(mood?: string | null): string | null {
-  if (!mood) return null;
-  const map: Record<string, string> = {
-    FELICE: "Felice",
-    TRISTE: "Triste",
-    STRESSATO: "Stressato",
-    ANNOIATO: "Annoiato",
-    RILASSATO: "Rilassato",
-    VOGLIA_DI_PARLARE: "Voglia di parlare",
-    CERCO_COMPAGNIA: "Cerco compagnia",
-    VOGLIA_DI_RIDERE: "Voglia di ridere",
-    CURIOSO: "Curioso",
-    MOTIVATO: "Motivato",
-  };
-  return map[mood] || mood;
-}
-
-const Sidebar: React.FC = () => {
+const SidebarContent: React.FC<{
+  receivedCount: number;
+  onNavigate?: () => void;
+}> = ({ receivedCount, onNavigate }) => {
   const { user } = useAuth();
   const { t } = useI18n();
   const navigate = useNavigate();
   const location = useLocation();
-
-  const [receivedCount, setReceivedCount] = useState<number>(0);
-
-  useEffect(() => {
-    let mounted = true;
-
-    const load = async () => {
-      try {
-        const reqs = await fetchFriendRequestsReceived();
-        if (mounted) setReceivedCount(reqs.length);
-      } catch {
-        // ignore
-      }
-    };
-
-    load();
-    const tmr = setInterval(load, 15000);
-    return () => {
-      mounted = false;
-      clearInterval(tmr);
-    };
-  }, []);
 
   if (!user) return null;
 
@@ -85,7 +58,11 @@ const Sidebar: React.FC = () => {
     { key: "navSettings", path: "/settings" },
   ];
 
-  const moodLabel = formatMood(user.mood);
+  const tMood = (key?: string | null) => {
+    if (!key) return "";
+    const translated = t(`mood_${key}`);
+    return translated === `mood_${key}` ? key : translated;
+  };
 
   return (
     <div
@@ -97,6 +74,7 @@ const Sidebar: React.FC = () => {
         display: "flex",
         flexDirection: "column",
         gap: 20,
+        height: "100%",
       }}
     >
       {/* Logo */}
@@ -106,7 +84,7 @@ const Sidebar: React.FC = () => {
           alignItems: "center",
           justifyContent: "center",
           gap: 8,
-          marginBottom: 10,
+          marginBottom: 6,
         }}
       >
         <img
@@ -177,9 +155,9 @@ const Sidebar: React.FC = () => {
           <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
             @{user.username}
           </div>
-          {moodLabel && (
+          {user.mood && (
             <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginTop: 2 }}>
-              Mood: {moodLabel}
+              Mood: {tMood(user.mood)}
             </div>
           )}
         </div>
@@ -194,7 +172,10 @@ const Sidebar: React.FC = () => {
           return (
             <button
               key={item.path}
-              onClick={() => navigate(item.path)}
+              onClick={() => {
+                navigate(item.path);
+                onNavigate?.();
+              }}
               style={{
                 textAlign: "left",
                 padding: "10px 14px",
@@ -232,6 +213,122 @@ const Sidebar: React.FC = () => {
         })}
       </div>
     </div>
+  );
+};
+
+const Sidebar: React.FC = () => {
+  const { user } = useAuth();
+  const isMobile = useIsMobile(900);
+
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [receivedCount, setReceivedCount] = useState<number>(0);
+
+  useEffect(() => {
+    let mounted = true;
+
+    const load = async () => {
+      try {
+        const reqs = await fetchFriendRequestsReceived();
+        if (mounted) setReceivedCount(reqs.length);
+      } catch {
+        // ignore
+      }
+    };
+
+    load();
+    const tmr = setInterval(load, 15000);
+    return () => {
+      mounted = false;
+      clearInterval(tmr);
+    };
+  }, []);
+
+  // Desktop: sidebar normale
+  if (!isMobile) {
+    return <SidebarContent receivedCount={receivedCount} />;
+  }
+
+  // Mobile: pulsante Menu fisso + drawer
+  if (!user) return null;
+
+  return (
+    <>
+      {/* Pulsante Menu fisso */}
+      <button
+        type="button"
+        onClick={() => setDrawerOpen(true)}
+        style={{
+          position: "fixed",
+          top: 10,
+          left: 10,
+          zIndex: 9999,
+          background: "var(--tiko-bg-card)",
+          border: "1px solid #333",
+          borderRadius: 12,
+          padding: "8px 10px",
+          fontSize: 12,
+          cursor: "pointer",
+          boxShadow: "var(--tiko-glow)",
+        }}
+      >
+        Menu
+      </button>
+
+      {/* Overlay + drawer */}
+      {drawerOpen && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex",
+          }}
+          onClick={() => setDrawerOpen(false)}
+        >
+          <div
+            style={{
+              width: 280,
+              maxWidth: "85vw",
+              height: "100%",
+              background: "var(--tiko-bg-dark)",
+              borderRight: "1px solid #222",
+              boxShadow: "0 0 24px rgba(0,0,0,0.6)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* header drawer */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "flex-end",
+                padding: 10,
+                borderBottom: "1px solid #222",
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                style={{
+                  background: "transparent",
+                  border: "1px solid #444",
+                  borderRadius: 10,
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                }}
+              >
+                Close
+              </button>
+            </div>
+
+            <SidebarContent
+              receivedCount={receivedCount}
+              onNavigate={() => setDrawerOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+    </>
   );
 };
 
