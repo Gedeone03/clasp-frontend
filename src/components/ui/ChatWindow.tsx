@@ -1,13 +1,7 @@
 // src/components/ui/ChatWindow.tsx
 
 import React, { useEffect, useRef, useState } from "react";
-import {
-  Conversation,
-  Message,
-  User,
-  uploadImage,
-  uploadAudio,
-} from "../../api";
+import { Conversation, Message, User, uploadImage, uploadAudio } from "../../api";
 
 function StatusDot({ state }: { state: string }) {
   const colors: Record<string, string> = {
@@ -36,18 +30,25 @@ function StatusDot({ state }: { state: string }) {
 function formatMood(mood?: string | null): string | null {
   if (!mood) return null;
   const map: Record<string, string> = {
-    FELICE: "Felice",
-    TRISTE: "Triste",
-    STRESSATO: "Stressato",
-    ANNOIATO: "Annoiato",
-    RILASSATO: "Rilassato",
-    VOGLIA_DI_PARLARE: "Voglia di parlare",
-    CERCO_COMPAGNIA: "Cerco compagnia",
-    VOGLIA_DI_RIDERE: "Voglia di ridere",
-    CURIOSO: "Curioso",
-    MOTIVATO: "Motivato",
+    FELICE: "Happy",
+    TRISTE: "Sad",
+    STRESSATO: "Stressed",
+    ANNOIATO: "Bored",
+    RILASSATO: "Relaxed",
+    VOGLIA_DI_PARLARE: "Wants to talk",
+    CERCO_COMPAGNIA: "Looking for company",
+    VOGLIA_DI_RIDERE: "Wants to laugh",
+    CURIOSO: "Curious",
+    MOTIVATO: "Motivated",
   };
   return map[mood] || mood;
+}
+
+function isImageUrl(content: string): boolean {
+  return /^(https?:\/\/|\/).+\.(png|jpe?g|gif|webp|avif|svg)$/i.test(content);
+}
+function isAudioUrl(content: string): boolean {
+  return /^(https?:\/\/|\/).+\.(mp3|ogg|wav|webm|m4a)$/i.test(content);
 }
 
 interface ChatWindowProps {
@@ -58,14 +59,7 @@ interface ChatWindowProps {
   onSend: (content: string) => void;
   onTyping: () => void;
   onDeleteConversation?: () => void;
-}
-
-function isImageUrl(content: string): boolean {
-  return /^(https?:\/\/|\/).+\.(png|jpe?g|gif|webp|avif|svg)$/i.test(content);
-}
-
-function isAudioUrl(content: string): boolean {
-  return /^(https?:\/\/|\/).+\.(mp3|ogg|wav|webm|m4a)$/i.test(content);
+  onBack?: () => void; // ✅ mobile back
 }
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -76,6 +70,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   onSend,
   onTyping,
   onDeleteConversation,
+  onBack,
 }) => {
   const [input, setInput] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
@@ -88,15 +83,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
   if (!conversation) {
     return (
-      <div className="tiko-content">
-        <div style={{ padding: 24 }}>Seleziona una conversazione</div>
+      <div style={{ height: "100%", padding: 24 }}>
+        Select a conversation
       </div>
     );
   }
@@ -124,7 +117,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
       const url = await uploadImage(file);
       onSend(url);
     } catch {
-      alert("Errore caricamento immagine");
+      alert("Image upload error");
     } finally {
       setUploadingImage(false);
       e.target.value = "";
@@ -149,7 +142,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const url = await uploadAudio(file);
           onSend(url);
         } catch {
-          alert("Errore invio audio");
+          alert("Audio send error");
         } finally {
           setUploadingAudio(false);
           stream.getTracks().forEach((t) => t.stop());
@@ -166,7 +159,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   };
 
   return (
-    <div className="tiko-content" style={{ display: "flex", flexDirection: "column" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
       {/* HEADER */}
       <div
         style={{
@@ -176,24 +169,40 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
+          gap: 12,
         }}
       >
-        <div>
+        <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {onBack && (
+              <button
+                type="button"
+                onClick={onBack}
+                style={{
+                  border: "1px solid #444",
+                  background: "transparent",
+                  borderRadius: 10,
+                  padding: "4px 8px",
+                  cursor: "pointer",
+                }}
+              >
+                Back
+              </button>
+            )}
             <StatusDot state={other?.state || "OFFLINE"} />
-            <strong>{other?.displayName}</strong>
+            <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {other?.displayName || "Conversation"}
+            </strong>
           </div>
 
           <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-            {otherMood && <>Mood: {otherMood} • </>}
-            {other?.interests?.length
-              ? `Interessi: ${other.interests.join(", ")}`
-              : ""}
+            {otherMood ? `Mood: ${otherMood} • ` : ""}
+            {other?.interests?.length ? `Interests: ${other.interests.join(", ")}` : ""}
           </div>
 
           {typingUserId && typingUserId !== currentUser.id && (
             <div style={{ fontSize: 12, color: "var(--tiko-blue)" }}>
-              Sta scrivendo…
+              Typing…
             </div>
           )}
         </div>
@@ -207,15 +216,16 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               borderRadius: 20,
               padding: "4px 10px",
               cursor: "pointer",
+              whiteSpace: "nowrap",
             }}
-            title="Elimina chat"
+            title="Delete chat"
           >
-            Elimina
+            Delete
           </button>
         )}
       </div>
 
-      {/* MESSAGGI */}
+      {/* MESSAGES */}
       <div
         ref={scrollRef}
         style={{
@@ -226,35 +236,28 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           flexDirection: "column",
           gap: 8,
           background: "var(--tiko-bg-dark)",
+          minHeight: 0,
         }}
       >
         {messages.map((m) => {
           const mine = m.senderId === currentUser.id;
-          const isImage = isImageUrl(m.content);
-          const isAudio = isAudioUrl(m.content);
+          const img = isImageUrl(m.content);
+          const aud = isAudioUrl(m.content);
 
           return (
-            <div
-              key={m.id}
-              style={{
-                display: "flex",
-                justifyContent: mine ? "flex-end" : "flex-start",
-              }}
-            >
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
               <div
                 style={{
-                  maxWidth: "65%",
+                  maxWidth: "70%",
                   padding: 10,
                   borderRadius: 14,
-                  background: mine
-                    ? "var(--tiko-purple)"
-                    : "var(--tiko-bg-card)",
+                  background: mine ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
                   color: mine ? "#fff" : "var(--tiko-text)",
                 }}
               >
-                {isImage ? (
+                {img ? (
                   <img src={m.content} style={{ maxWidth: "100%", borderRadius: 10 }} />
-                ) : isAudio ? (
+                ) : aud ? (
                   <audio controls src={m.content} style={{ width: "100%" }} />
                 ) : (
                   <div>{m.content}</div>
@@ -296,17 +299,17 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onTyping}
-          placeholder="Scrivi un messaggio…"
+          placeholder="Type a message…"
           style={{ flex: 1 }}
         />
 
         <button type="submit" disabled={!input.trim()}>
-          Invia
+          Send
         </button>
       </form>
 
       {(uploadingImage || uploadingAudio) && (
-        <div style={{ fontSize: 12, padding: 6 }}>Invio in corso…</div>
+        <div style={{ fontSize: 12, padding: 6 }}>Sending…</div>
       )}
     </div>
   );
