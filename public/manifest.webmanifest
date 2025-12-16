@@ -1,7 +1,7 @@
 {
   "name": "CLASP",
   "short_name": "CLASP",
-  "description": "CLASP - chat e amicizie in tempo reale.",
+  "description": "CLASP - social chat basata sul mood.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

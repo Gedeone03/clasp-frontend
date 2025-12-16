@@ -1,17 +1,13 @@
 // public/service-worker.js
 
 self.addEventListener("install", (event) => {
-  console.log("[CLASP SW] Install");
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {
-  console.log("[CLASP SW] Activate");
   event.waitUntil(self.clients.claim());
 });
 
-// Per ora niente cache complessa.
-// In futuro si può aggiungere caching offline qui.
-self.addEventListener("fetch", (event) => {
-  // passthrough
-});
+// Per ora non facciamo cache aggressiva (più sicuro in fase di sviluppo).
+// In futuro possiamo aggiungere caching offline qui.
+self.addEventListener("fetch", () => {});
