@@ -1,6 +1,6 @@
 // src/pages/HomePage.tsx
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
@@ -45,20 +45,20 @@ const HomePage: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [typingUserId, setTypingUserId] = useState<number | null>(null);
 
-  // Mobile: quale schermata stiamo mostrando?
-  const [mobileView, setMobileView] = useState<"list" | "chat">("list");
+  // Mobile views
+  const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
+  const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
 
-  // Ricerca utenti
+  // Search
   const [searchTerm, setSearchTerm] = useState("");
   const [searchVisibleOnly, setSearchVisibleOnly] = useState(false);
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
 
-  // Feedback richiesta amico
   const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
 
-  // Cache amici & richieste inviate (per disabilitare bottoni)
+  // Relationship cache
   const [friendIds, setFriendIds] = useState<Set<number>>(new Set());
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
 
@@ -69,8 +69,8 @@ const HomePage: React.FC = () => {
       const list = await fetchConversations();
       setConversations(list);
 
-      // se non ho selezionato nulla, non forzo in mobile (l'utente sceglie)
-      if (!selectedConversation && !isMobile && list.length > 0) {
+      // desktop: seleziona prima chat se nessuna selezionata
+      if (!isMobile && !selectedConversation && list.length > 0) {
         setSelectedConversation(list[0]);
         loadMessages(list[0].id);
       }
@@ -113,7 +113,7 @@ const HomePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // SOCKET
+  // Socket
   const socket = useChatSocket(user ? user.id : null, {
     onMessage: ({ conversationId, message }) => {
       if (selectedConversation?.id === conversationId) {
@@ -126,20 +126,21 @@ const HomePage: React.FC = () => {
     onUserOffline: () => loadConversations(),
     onTyping: ({ conversationId, userId }) => {
       if (conversationId !== selectedConversation?.id) return;
+
       setTypingUserId(userId);
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
+
       typingTimeout.current = setTimeout(() => setTypingUserId(null), 1500);
     },
   });
 
   useEffect(() => {
-    if (selectedConversation) {
-      socket.joinConversation(selectedConversation.id);
-      loadMessages(selectedConversation.id);
+    if (!selectedConversation) return;
 
-      // su mobile, quando selezioni una chat, vai alla view chat
-      if (isMobile) setMobileView("chat");
-    }
+    socket.joinConversation(selectedConversation.id);
+    loadMessages(selectedConversation.id);
+
+    if (isMobile) setMobileScreen("chat");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversation]);
 
@@ -164,8 +165,7 @@ const HomePage: React.FC = () => {
       await loadConversations();
       setSelectedConversation(null);
       setMessages([]);
-
-      if (isMobile) setMobileView("list");
+      if (isMobile) setMobileScreen("list");
     } catch (err) {
       console.error(err);
       alert(t("homeDeleteChatError"));
@@ -195,7 +195,8 @@ const HomePage: React.FC = () => {
     try {
       await createConversation(u.id);
       await loadConversations();
-      // su mobile l’utente vedrà la chat nella lista e può aprirla
+      // su mobile: l’utente può poi aprire la conversazione dalla tab Chats
+      if (isMobile) setMobileTab("chats");
     } catch (err) {
       console.error(err);
       alert("Error creating chat");
@@ -224,157 +225,291 @@ const HomePage: React.FC = () => {
     }
   };
 
-  const leftPane = (
+  if (!user) return <div>Not authenticated</div>;
+
+  const MobileTopTabs = (
     <div
       style={{
-        width: isMobile ? "100%" : 340,
-        borderRight: isMobile ? "none" : "1px solid #222",
         display: "flex",
-        flexDirection: "column",
+        gap: 8,
+        padding: 10,
+        borderBottom: "1px solid #222",
         background: "var(--tiko-bg-gray)",
-        minWidth: 0,
-        height: "100%",
       }}
     >
-      {/* Search */}
-      <div style={{ padding: 12, borderBottom: "1px solid #222" }}>
-        <form
-          onSubmit={handleSearchUsers}
-          style={{ display: "flex", flexDirection: "column", gap: 8 }}
-        >
-          <input
-            placeholder={t("homeSearchPlaceholder")}
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-
-          <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-            <input
-              type="checkbox"
-              checked={searchVisibleOnly}
-              onChange={(e) => setSearchVisibleOnly(e.target.checked)}
-              style={{ marginRight: 6 }}
-            />
-            {t("homeVisibleOnly")}
-          </label>
-
-          <button disabled={searchLoading}>{t("homeSearchButton")}</button>
-        </form>
-
-        {searchError && <div style={{ color: "red", marginTop: 8 }}>{searchError}</div>}
-        {friendRequestMsg && (
-          <div style={{ color: "var(--tiko-text-dim)", marginTop: 8 }}>
-            {friendRequestMsg}
-          </div>
-        )}
-
-        {searchResults.length > 0 && (
-          <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-            {searchResults.map((u) => {
-              const isFriend = friendIds.has(u.id);
-              const isPendingSent = sentRequestUserIds.has(u.id);
-
-              return (
-                <div
-                  key={u.id}
-                  style={{
-                    padding: 10,
-                    borderRadius: 12,
-                    background: "var(--tiko-bg-card)",
-                    border: "1px solid #2a2a2a",
-                  }}
-                >
-                  <div style={{ fontSize: 13 }}>
-                    <strong>{u.displayName}</strong>{" "}
-                    <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
-                  </div>
-
-                  {u.mood && (
-                    <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
-                      Mood: {u.mood}
-                    </div>
-                  )}
-
-                  {u.interests?.length ? (
-                    <div style={{ fontSize: 12, marginTop: 2 }}>
-                      Interests: {u.interests.join(", ")}
-                    </div>
-                  ) : null}
-
-                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                    <button style={{ fontSize: 12 }} onClick={() => startChatWithUser(u)}>
-                      {t("homeStartChat")}
-                    </button>
-
-                    <button
-                      style={{
-                        fontSize: 12,
-                        background: isFriend || isPendingSent ? "#444" : "var(--tiko-mint)",
-                        color: isFriend || isPendingSent ? "#bbb" : "#000",
-                        cursor: isFriend || isPendingSent ? "not-allowed" : "pointer",
-                      }}
-                      disabled={isFriend || isPendingSent}
-                      onClick={() => handleSendFriendRequest(u)}
-                    >
-                      {isFriend
-                        ? t("homeAlreadyFriendsButton")
-                        : isPendingSent
-                        ? t("homeRequestSentButton")
-                        : t("homeSendFriendRequest")}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </div>
-
-      {/* Conversations */}
-      <div style={{ flex: 1, minHeight: 0 }}>
-        <ConversationList
-          conversations={conversations}
-          selectedConversationId={selectedConversation?.id ?? null}
-          onSelect={(conv) => setSelectedConversation(conv)}
-        />
-      </div>
+      <button
+        type="button"
+        onClick={() => setMobileTab("chats")}
+        style={{
+          flex: 1,
+          background: mobileTab === "chats" ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
+        }}
+      >
+        Chats
+      </button>
+      <button
+        type="button"
+        onClick={() => setMobileTab("search")}
+        style={{
+          flex: 1,
+          background: mobileTab === "search" ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
+        }}
+      >
+        Search
+      </button>
     </div>
   );
 
-  const chatPane = (
-    <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-      <ChatWindow
-        conversation={selectedConversation}
-        messages={messages}
-        currentUser={user!}
-        typingUserId={typingUserId}
-        onSend={handleSend}
-        onTyping={handleTyping}
-        onDeleteConversation={handleDeleteConversation}
-        // mobile back
-        onBack={isMobile ? () => setMobileView("list") : undefined}
+  const SearchPanel = (
+    <div style={{ padding: 12 }}>
+      <form onSubmit={handleSearchUsers} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        <input
+          placeholder={t("homeSearchPlaceholder")}
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+        />
+        <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          <input
+            type="checkbox"
+            checked={searchVisibleOnly}
+            onChange={(e) => setSearchVisibleOnly(e.target.checked)}
+            style={{ marginRight: 6 }}
+          />
+          {t("homeVisibleOnly")}
+        </label>
+        <button disabled={searchLoading}>{t("homeSearchButton")}</button>
+      </form>
+
+      {searchError && <div style={{ color: "red", marginTop: 8 }}>{searchError}</div>}
+      {friendRequestMsg && <div style={{ color: "var(--tiko-text-dim)", marginTop: 8 }}>{friendRequestMsg}</div>}
+
+      {searchResults.length > 0 && (
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+          {searchResults.map((u) => {
+            const isFriend = friendIds.has(u.id);
+            const isPendingSent = sentRequestUserIds.has(u.id);
+
+            return (
+              <div
+                key={u.id}
+                style={{
+                  padding: 10,
+                  borderRadius: 12,
+                  background: "var(--tiko-bg-card)",
+                  border: "1px solid #2a2a2a",
+                }}
+              >
+                <div style={{ fontSize: 13 }}>
+                  <strong>{u.displayName}</strong>{" "}
+                  <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
+                </div>
+
+                {u.mood && (
+                  <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
+                    Mood: {u.mood}
+                  </div>
+                )}
+
+                {u.interests?.length ? (
+                  <div style={{ fontSize: 12, marginTop: 2 }}>
+                    Interests: {u.interests.join(", ")}
+                  </div>
+                ) : null}
+
+                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                  <button style={{ fontSize: 12 }} onClick={() => startChatWithUser(u)} type="button">
+                    {t("homeStartChat")}
+                  </button>
+
+                  <button
+                    style={{
+                      fontSize: 12,
+                      background: isFriend || isPendingSent ? "#444" : "var(--tiko-mint)",
+                      color: isFriend || isPendingSent ? "#bbb" : "#000",
+                      cursor: isFriend || isPendingSent ? "not-allowed" : "pointer",
+                    }}
+                    disabled={isFriend || isPendingSent}
+                    onClick={() => handleSendFriendRequest(u)}
+                    type="button"
+                  >
+                    {isFriend
+                      ? t("homeAlreadyFriendsButton")
+                      : isPendingSent
+                      ? t("homeRequestSentButton")
+                      : t("homeSendFriendRequest")}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  const ChatsPanel = (
+    <div style={{ flex: 1, minHeight: 0 }}>
+      <ConversationList
+        conversations={conversations}
+        selectedConversationId={selectedConversation?.id ?? null}
+        onSelect={(conv) => setSelectedConversation(conv)}
       />
     </div>
   );
 
-  if (!user) return <div>Not authenticated</div>;
+  // ----- Render -----
+  if (isMobile) {
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--tiko-bg-dark)" }}>
+        {mobileScreen === "list" ? (
+          <>
+            {MobileTopTabs}
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {mobileTab === "search" ? SearchPanel : ChatsPanel}
+            </div>
+          </>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ChatWindow
+              conversation={selectedConversation}
+              messages={messages}
+              currentUser={user}
+              typingUserId={typingUserId}
+              onSend={handleSend}
+              onTyping={handleTyping}
+              onDeleteConversation={handleDeleteConversation}
+              onBack={() => setMobileScreen("list")}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
 
+  // Desktop layout (3 colonne)
   return (
     <div className="tiko-layout" style={{ height: "100vh", overflow: "hidden" }}>
-      {/* Sidebar: nascondi su mobile per avere spazio */}
-      {!isMobile && <Sidebar />}
+      <Sidebar />
 
-      {/* Mobile: mostra una sola view */}
-      {isMobile ? (
+      <div style={{ flex: 1, display: "flex", minWidth: 0, height: "100%" }}>
+        <div
+          style={{
+            width: 340,
+            borderRight: "1px solid #222",
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--tiko-bg-gray)",
+            minWidth: 0,
+            height: "100%",
+          }}
+        >
+          {/* desktop: search */}
+          <div style={{ padding: 12, borderBottom: "1px solid #222" }}>
+            <form onSubmit={handleSearchUsers} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <input
+                placeholder={t("homeSearchPlaceholder")}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                <input
+                  type="checkbox"
+                  checked={searchVisibleOnly}
+                  onChange={(e) => setSearchVisibleOnly(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                {t("homeVisibleOnly")}
+              </label>
+              <button disabled={searchLoading}>{t("homeSearchButton")}</button>
+            </form>
+
+            {searchError && <div style={{ color: "red", marginTop: 8 }}>{searchError}</div>}
+            {friendRequestMsg && <div style={{ color: "var(--tiko-text-dim)", marginTop: 8 }}>{friendRequestMsg}</div>}
+
+            {searchResults.length > 0 && (
+              <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
+                {searchResults.map((u) => {
+                  const isFriend = friendIds.has(u.id);
+                  const isPendingSent = sentRequestUserIds.has(u.id);
+
+                  return (
+                    <div
+                      key={u.id}
+                      style={{
+                        padding: 10,
+                        borderRadius: 12,
+                        background: "var(--tiko-bg-card)",
+                        border: "1px solid #2a2a2a",
+                      }}
+                    >
+                      <div style={{ fontSize: 13 }}>
+                        <strong>{u.displayName}</strong>{" "}
+                        <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
+                      </div>
+
+                      {u.mood && (
+                        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
+                          Mood: {u.mood}
+                        </div>
+                      )}
+
+                      {u.interests?.length ? (
+                        <div style={{ fontSize: 12, marginTop: 2 }}>
+                          Interests: {u.interests.join(", ")}
+                        </div>
+                      ) : null}
+
+                      <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                        <button style={{ fontSize: 12 }} onClick={() => startChatWithUser(u)} type="button">
+                          {t("homeStartChat")}
+                        </button>
+
+                        <button
+                          style={{
+                            fontSize: 12,
+                            background: isFriend || isPendingSent ? "#444" : "var(--tiko-mint)",
+                            color: isFriend || isPendingSent ? "#bbb" : "#000",
+                            cursor: isFriend || isPendingSent ? "not-allowed" : "pointer",
+                          }}
+                          disabled={isFriend || isPendingSent}
+                          onClick={() => handleSendFriendRequest(u)}
+                          type="button"
+                        >
+                          {isFriend
+                            ? t("homeAlreadyFriendsButton")
+                            : isPendingSent
+                            ? t("homeRequestSentButton")
+                            : t("homeSendFriendRequest")}
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ConversationList
+              conversations={conversations}
+              selectedConversationId={selectedConversation?.id ?? null}
+              onSelect={(conv) => setSelectedConversation(conv)}
+            />
+          </div>
+        </div>
+
         <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-          {mobileView === "list" ? leftPane : chatPane}
+          <ChatWindow
+            conversation={selectedConversation}
+            messages={messages}
+            currentUser={user}
+            typingUserId={typingUserId}
+            onSend={handleSend}
+            onTyping={handleTyping}
+            onDeleteConversation={handleDeleteConversation}
+          />
         </div>
-      ) : (
-        <div style={{ flex: 1, display: "flex", minWidth: 0, height: "100%" }}>
-          {leftPane}
-          {chatPane}
-        </div>
-      )}
+      </div>
     </div>
   );
 };
