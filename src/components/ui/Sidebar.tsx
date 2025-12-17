@@ -237,9 +237,9 @@ const Sidebar: React.FC = () => {
           top: "calc(env(safe-area-inset-top, 0px) + 10px)",
           left: "calc(env(safe-area-inset-left, 0px) + 10px)",
           zIndex: 9999,
-          background: "var(--tiko-purple)",
+          background:  "#E53935",        // rosso evidente
           color: "#fff",
-          border: "1px solid #333",
+          border: "1px solid #B71C1C",
           borderRadius: 12,
           padding: "10px 12px",
           fontSize: 13,
