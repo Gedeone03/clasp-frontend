@@ -314,8 +314,8 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           // mine: spostato a destra ma non attaccato
           // others: spostato a sinistra ma non attaccato
           const rowPaddingStyle = mine
-            ? { marginLeft: "18%", marginRight: 6 }
-            : { marginRight: "18%", marginLeft: 6 };
+            ? { marginLeft: "25%", marginRight: 6 }
+            : { marginRight: "25%", marginLeft: 6 };
 
           return (
             <div
