@@ -49,8 +49,12 @@ const HomePage: React.FC = () => {
   const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
   const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
 
-  // ✅ NEW: overlay per switch veloce chat mentre sei in chat
+  // Drawer per switch chat su mobile (solo se NON in focus mode)
   const [mobileChatsDrawerOpen, setMobileChatsDrawerOpen] = useState(false);
+
+  // ✅ Focus mode: mostra SOLO la conversazione richiesta
+  const [focusMode, setFocusMode] = useState(false);
+  const [focusConvId, setFocusConvId] = useState<number | null>(null);
 
   // Search
   const [searchTerm, setSearchTerm] = useState("");
@@ -67,31 +71,31 @@ const HomePage: React.FC = () => {
 
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
 
+  // ✅ Leggi query param UNA volta
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const convIdStr = params.get("convId");
+    const focusStr = params.get("focus");
+
+    const convId = convIdStr ? Number(convIdStr) : null;
+    const focus = focusStr === "1";
+
+    if (convId && !Number.isNaN(convId)) {
+      setFocusConvId(convId);
+      setFocusMode(focus);
+    } else {
+      setFocusConvId(null);
+      setFocusMode(false);
+    }
+  }, []);
+
   const loadConversations = async () => {
     try {
       const list = await fetchConversations();
       setConversations(list);
-  // Se arrivo da FriendsPage con ?convId=123, seleziono quella chat
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const convIdStr = params.get("convId");
-    const convId = convIdStr ? Number(convIdStr) : null;
-    if (!convId || Number.isNaN(convId)) return;
 
-    // quando conversations sono caricate, selezioniamo quella
-    const found = conversations.find((c) => c.id === convId);
-    if (found) {
-      setSelectedConversation(found);
-      if (window.location.search.includes("convId=")) {
-        // pulizia URL (opzionale)
-        const url = new URL(window.location.href);
-        url.searchParams.delete("convId");
-        window.history.replaceState({}, "", url.toString());
-      }
-    }
-  }, [conversations]);
-
-      if (!isMobile && !selectedConversation && list.length > 0) {
+      // Desktop: seleziona la prima chat solo se non in focus
+      if (!isMobile && !focusMode && !selectedConversation && list.length > 0) {
         setSelectedConversation(list[0]);
         loadMessages(list[0].id);
       }
@@ -133,6 +137,13 @@ const HomePage: React.FC = () => {
     loadRelationships();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // ✅ Se focusConvId è impostato, seleziona quella chat quando arrivano le conversazioni
+  useEffect(() => {
+    if (!focusConvId) return;
+    const found = conversations.find((c) => c.id === focusConvId);
+    if (found) setSelectedConversation(found);
+  }, [conversations, focusConvId]);
 
   // Socket
   const socket = useChatSocket(user ? user.id : null, {
@@ -212,7 +223,7 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // Start chat: seleziona subito la conversazione e apre chat
+  // Start chat from search (normal mode)
   const startChatWithUser = async (u: User) => {
     try {
       const conv = await createConversation(u.id);
@@ -252,6 +263,79 @@ const HomePage: React.FC = () => {
   };
 
   if (!user) return <div>Not authenticated</div>;
+
+  // ✅ Se focusMode è ON, la lista conversazioni è SOLO quella
+  const conversationsForList =
+    focusMode && focusConvId
+      ? conversations.filter((c) => c.id === focusConvId)
+      : conversations;
+
+  // Mobile drawer chats (disabilitato in focusMode)
+  const MobileChatsDrawer =
+    !focusMode && mobileChatsDrawerOpen ? (
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 12000,
+          background: "rgba(0,0,0,0.55)",
+          display: "flex",
+        }}
+        onClick={() => setMobileChatsDrawerOpen(false)}
+      >
+        <div
+          style={{
+            width: 320,
+            maxWidth: "90vw",
+            height: "100%",
+            background: "var(--tiko-bg-dark)",
+            borderRight: "1px solid #222",
+            boxShadow: "0 0 24px rgba(0,0,0,0.6)",
+            display: "flex",
+            flexDirection: "column",
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            style={{
+              padding: 12,
+              borderBottom: "1px solid #222",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              background: "var(--tiko-bg-gray)",
+            }}
+          >
+            <strong>Chats</strong>
+            <button
+              type="button"
+              onClick={() => setMobileChatsDrawerOpen(false)}
+              style={{
+                border: "1px solid #444",
+                background: "transparent",
+                borderRadius: 10,
+                padding: "6px 10px",
+                cursor: "pointer",
+                color: "#fff",
+              }}
+            >
+              Close
+            </button>
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ConversationList
+              conversations={conversationsForList}
+              selectedConversationId={selectedConversation?.id ?? null}
+              onSelect={(conv) => {
+                setSelectedConversation(conv);
+                setMobileChatsDrawerOpen(false);
+              }}
+            />
+          </div>
+        </div>
+      </div>
+    ) : null;
 
   const MobileTopTabs = (
     <div
@@ -375,79 +459,36 @@ const HomePage: React.FC = () => {
 
   const ChatsPanel = (
     <div style={{ flex: 1, minHeight: 0 }}>
+      {/* In focusMode la lista contiene SOLO quella chat */}
       <ConversationList
-        conversations={conversations}
+        conversations={conversationsForList}
         selectedConversationId={selectedConversation?.id ?? null}
         onSelect={(conv) => setSelectedConversation(conv)}
       />
-    </div>
-  );
 
-  // ✅ Drawer Chats overlay (solo quando sei dentro la chat su mobile)
-  const MobileChatsDrawer = mobileChatsDrawerOpen ? (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 12000,
-        background: "rgba(0,0,0,0.55)",
-        display: "flex",
-      }}
-      onClick={() => setMobileChatsDrawerOpen(false)}
-    >
-      <div
-        style={{
-          width: 320,
-          maxWidth: "90vw",
-          height: "100%",
-          background: "var(--tiko-bg-dark)",
-          borderRight: "1px solid #222",
-          boxShadow: "0 0 24px rgba(0,0,0,0.6)",
-          display: "flex",
-          flexDirection: "column",
-        }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          style={{
-            padding: 12,
-            borderBottom: "1px solid #222",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            background: "var(--tiko-bg-gray)",
-          }}
-        >
-          <strong>Chats</strong>
+      {/* Bottone uscita focus */}
+      {focusMode && (
+        <div style={{ padding: 10 }}>
           <button
             type="button"
-            onClick={() => setMobileChatsDrawerOpen(false)}
-            style={{
-              border: "1px solid #444",
-              background: "transparent",
-              borderRadius: 10,
-              padding: "6px 10px",
-              cursor: "pointer",
-              color: "#fff",
+            onClick={() => {
+              setFocusMode(false);
+              setFocusConvId(null);
+              const url = new URL(window.location.href);
+              url.searchParams.delete("convId");
+              url.searchParams.delete("focus");
+              window.history.replaceState({}, "", url.toString());
+              // torna a vedere tutte le chat
+              loadConversations();
             }}
+            style={{ width: "100%" }}
           >
-            Close
+            Torna a tutte le chat
           </button>
         </div>
-
-        <div style={{ flex: 1, minHeight: 0 }}>
-          <ConversationList
-            conversations={conversations}
-            selectedConversationId={selectedConversation?.id ?? null}
-            onSelect={(conv) => {
-              setSelectedConversation(conv);
-              setMobileChatsDrawerOpen(false);
-            }}
-          />
-        </div>
-      </div>
+      )}
     </div>
-  ) : null;
+  );
 
   // MOBILE
   if (isMobile) {
@@ -464,29 +505,31 @@ const HomePage: React.FC = () => {
           </div>
         ) : (
           <div style={{ height: "100vh", position: "relative" }}>
-            {/* pulsante rapido per switch chat */}
-            <button
-              type="button"
-              onClick={() => setMobileChatsDrawerOpen(true)}
-              style={{
-                position: "fixed",
-                top: "calc(env(safe-area-inset-top, 0px) + 10px)",
-                right: "calc(env(safe-area-inset-right, 0px) + 10px)",
-                zIndex: 11000,
-                background: "var(--tiko-bg-card)",
-                border: "1px solid #333",
-                borderRadius: 12,
-                padding: "10px 12px",
-                fontSize: 13,
-                fontWeight: 700,
-                cursor: "pointer",
-                boxShadow: "var(--tiko-glow)",
-                color: "#fff",
-              }}
-              title="Switch chat"
-            >
-              Chats
-            </button>
+            {/* switch rapido chat SOLO se non focus */}
+            {!focusMode && (
+              <button
+                type="button"
+                onClick={() => setMobileChatsDrawerOpen(true)}
+                style={{
+                  position: "fixed",
+                  top: "calc(env(safe-area-inset-top, 0px) + 10px)",
+                  right: "calc(env(safe-area-inset-right, 0px) + 10px)",
+                  zIndex: 11000,
+                  background: "var(--tiko-bg-card)",
+                  border: "1px solid #333",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  fontSize: 13,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  boxShadow: "var(--tiko-glow)",
+                  color: "#fff",
+                }}
+                title="Switch chat"
+              >
+                Chats
+              </button>
+            )}
 
             {MobileChatsDrawer}
 
@@ -546,12 +589,33 @@ const HomePage: React.FC = () => {
             </form>
           </div>
 
+          {/* Desktop list: focusMode mostra solo 1 chat */}
           <div style={{ flex: 1, minHeight: 0 }}>
             <ConversationList
-              conversations={conversations}
+              conversations={conversationsForList}
               selectedConversationId={selectedConversation?.id ?? null}
               onSelect={(conv) => setSelectedConversation(conv)}
             />
+
+            {focusMode && (
+              <div style={{ padding: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFocusMode(false);
+                    setFocusConvId(null);
+                    const url = new URL(window.location.href);
+                    url.searchParams.delete("convId");
+                    url.searchParams.delete("focus");
+                    window.history.replaceState({}, "", url.toString());
+                    loadConversations();
+                  }}
+                  style={{ width: "100%" }}
+                >
+                  Torna a tutte le chat
+                </button>
+              </div>
+            )}
           </div>
         </div>
 

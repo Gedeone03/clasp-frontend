@@ -151,11 +151,11 @@ const FriendsPage: React.FC = () => {
     }
   };
 
-  // ✅ click su amico = crea/apri conversazione e vai in Home
+  // ✅ Apri chat SOLO con quell'amico (focus=1)
   const openChatWithFriend = async (friend: User) => {
     try {
       const conv = await createConversation(friend.id);
-      navigate(`/?convId=${conv.id}`);
+      navigate(`/?convId=${conv.id}&focus=1`);
     } catch (e) {
       console.error(e);
       alert("Error opening chat");
@@ -213,7 +213,7 @@ const FriendsPage: React.FC = () => {
           </div>
         )}
 
-        {/* Friends */}
+        {/* FRIENDS */}
         <section className="tiko-card">
           <h2 style={{ marginBottom: 10 }}>{t("friendsYourFriends")}</h2>
 
@@ -242,14 +242,21 @@ const FriendsPage: React.FC = () => {
                       borderRadius: 10,
                       cursor: "pointer",
                     }}
-                    title="Open chat"
+                    title="Open direct chat"
                   >
                     <Avatar user={f} />
+
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center" }}>
                         <StatusDot state={f.state} />
                         <strong>{f.displayName}</strong>
-                        <span style={{ marginLeft: 6, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                        <span
+                          style={{
+                            marginLeft: 6,
+                            fontSize: 12,
+                            color: "var(--tiko-text-dim)",
+                          }}
+                        >
                           @{f.username}
                         </span>
                       </div>
@@ -291,7 +298,7 @@ const FriendsPage: React.FC = () => {
           )}
         </section>
 
-        {/* Received */}
+        {/* RECEIVED */}
         <section className="tiko-card">
           <h2 style={{ marginBottom: 10 }}>{t("friendsRequestsReceived")}</h2>
 
@@ -304,9 +311,6 @@ const FriendsPage: React.FC = () => {
               {received.map((r) => {
                 const sender = r.sender;
                 if (!sender) return null;
-
-                const moodLabel = sender.mood ? tMood(sender.mood) : null;
-                const moodColor = getMoodColor(sender.mood);
 
                 return (
                   <div
@@ -329,27 +333,10 @@ const FriendsPage: React.FC = () => {
                           @{sender.username}
                         </span>
                       </div>
-
                       <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
                         {t("friendsWantsToAddYou")}
-                        {moodLabel && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              backgroundColor: moodColor,
-                              color: "#000",
-                              borderRadius: 999,
-                              padding: "2px 8px",
-                              fontSize: 11,
-                              marginLeft: 6,
-                            }}
-                          >
-                            {moodLabel}
-                          </span>
-                        )}
                       </div>
                     </div>
-
                     <div style={{ display: "flex", gap: 6 }}>
                       <button
                         onClick={() => handleAccept(r.id)}
@@ -380,7 +367,7 @@ const FriendsPage: React.FC = () => {
           )}
         </section>
 
-        {/* Sent */}
+        {/* SENT */}
         <section className="tiko-card">
           <h2 style={{ marginBottom: 10 }}>{t("friendsRequestsSent")}</h2>
 
@@ -393,9 +380,6 @@ const FriendsPage: React.FC = () => {
               {sent.map((r) => {
                 const receiver = r.receiver;
                 if (!receiver) return null;
-
-                const moodLabel = receiver.mood ? tMood(receiver.mood) : null;
-                const moodColor = getMoodColor(receiver.mood);
 
                 return (
                   <div
@@ -418,24 +402,8 @@ const FriendsPage: React.FC = () => {
                           @{receiver.username}
                         </span>
                       </div>
-
                       <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
                         {t("friendsPending")}
-                        {moodLabel && (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              backgroundColor: moodColor,
-                              color: "#000",
-                              borderRadius: 999,
-                              padding: "2px 8px",
-                              fontSize: 11,
-                              marginLeft: 6,
-                            }}
-                          >
-                            {moodLabel}
-                          </span>
-                        )}
                       </div>
                     </div>
                   </div>
