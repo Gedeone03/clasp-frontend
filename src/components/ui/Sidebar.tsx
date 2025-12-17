@@ -1,6 +1,6 @@
 // src/components/ui/Sidebar.tsx
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../../AuthContext";
 import { fetchFriendRequestsReceived } from "../../api";
@@ -77,27 +77,13 @@ const SidebarContent: React.FC<{
         height: "100%",
       }}
     >
-      {/* Logo */}
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: 8,
-          marginBottom: 6,
-        }}
-      >
-        <img
-          src="/icons/clasp-icon-192.png"
-          alt="CLASP"
-          style={{ width: 32, height: 32, borderRadius: 8 }}
-        />
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8 }}>
+        <img src="/icons/clasp-icon-192.png" alt="CLASP" style={{ width: 32, height: 32, borderRadius: 8 }} />
         <h1 className="tiko-title" style={{ fontSize: 24, margin: 0 }}>
           {t("appName")}
         </h1>
       </div>
 
-      {/* User card */}
       <div
         style={{
           padding: 12,
@@ -113,13 +99,7 @@ const SidebarContent: React.FC<{
           <img
             src={user.avatarUrl}
             alt="Avatar"
-            style={{
-              width: 42,
-              height: 42,
-              borderRadius: "50%",
-              objectFit: "cover",
-              border: "2px solid var(--tiko-purple)",
-            }}
+            style={{ width: 42, height: 42, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--tiko-purple)" }}
           />
         ) : (
           <div
@@ -127,8 +107,7 @@ const SidebarContent: React.FC<{
               width: 42,
               height: 42,
               borderRadius: "50%",
-              background:
-                "linear-gradient(140deg, var(--tiko-purple), var(--tiko-blue))",
+              background: "linear-gradient(140deg, var(--tiko-purple), var(--tiko-blue))",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -152,9 +131,7 @@ const SidebarContent: React.FC<{
             <StatusDot state={user.state} />
             <strong>{user.displayName}</strong>
           </div>
-          <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-            @{user.username}
-          </div>
+          <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>@{user.username}</div>
           {user.mood && (
             <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginTop: 2 }}>
               Mood: {tMood(user.mood)}
@@ -163,7 +140,6 @@ const SidebarContent: React.FC<{
         </div>
       </div>
 
-      {/* Menu */}
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {menuItems.map((item) => {
           const selected = location.pathname === item.path;
@@ -185,12 +161,10 @@ const SidebarContent: React.FC<{
                 fontWeight: selected ? 700 : 400,
                 cursor: "pointer",
                 border: "1px solid #333",
-                transition: "0.2s",
                 position: "relative",
               }}
             >
               {t(item.key)}
-
               {isFriends && receivedCount > 0 && (
                 <span
                   style={{
@@ -230,9 +204,7 @@ const Sidebar: React.FC = () => {
       try {
         const reqs = await fetchFriendRequestsReceived();
         if (mounted) setReceivedCount(reqs.length);
-      } catch {
-        // ignore
-      }
+      } catch {}
     };
 
     load();
@@ -243,30 +215,28 @@ const Sidebar: React.FC = () => {
     };
   }, []);
 
-  // Desktop: sidebar normale
-  if (!isMobile) {
-    return <SidebarContent receivedCount={receivedCount} />;
-  }
-
-  // Mobile: pulsante Menu fisso + drawer
   if (!user) return null;
+
+  if (!isMobile) {
+    return <SidebarContent receivedCount={receivedCount} />Menu</button>
 
   return (
     <>
-      {/* Pulsante Menu fisso */}
       <button
         type="button"
         onClick={() => setDrawerOpen(true)}
         style={{
           position: "fixed",
-          top: 10,
-          left: 10,
+          top: "calc(env(safe-area-inset-top, 0px) + 10px)",
+          left: "calc(env(safe-area-inset-left, 0px) + 10px)",
           zIndex: 9999,
-          background: "var(--tiko-bg-card)",
+          background: "var(--tiko-purple)",
+          color: "#fff",
           border: "1px solid #333",
           borderRadius: 12,
-          padding: "8px 10px",
-          fontSize: 12,
+          padding: "10px 12px",
+          fontSize: 13,
+          fontWeight: 700,
           cursor: "pointer",
           boxShadow: "var(--tiko-glow)",
         }}
@@ -274,7 +244,6 @@ const Sidebar: React.FC = () => {
         Menu
       </button>
 
-      {/* Overlay + drawer */}
       {drawerOpen && (
         <div
           style={{
@@ -288,7 +257,7 @@ const Sidebar: React.FC = () => {
         >
           <div
             style={{
-              width: 280,
+              width: 290,
               maxWidth: "85vw",
               height: "100%",
               background: "var(--tiko-bg-dark)",
@@ -297,15 +266,7 @@ const Sidebar: React.FC = () => {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            {/* header drawer */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "flex-end",
-                padding: 10,
-                borderBottom: "1px solid #222",
-              }}
-            >
+            <div style={{ display: "flex", justifyContent: "flex-end", padding: 10, borderBottom: "1px solid #222" }}>
               <button
                 type="button"
                 onClick={() => setDrawerOpen(false)}
@@ -315,16 +276,14 @@ const Sidebar: React.FC = () => {
                   borderRadius: 10,
                   padding: "6px 10px",
                   cursor: "pointer",
+                  color: "#fff",
                 }}
               >
                 Close
               </button>
             </div>
 
-            <SidebarContent
-              receivedCount={receivedCount}
-              onNavigate={() => setDrawerOpen(false)}
-            />
+            <SidebarContent receivedCount={receivedCount} onNavigate={() => setDrawerOpen(false)} />
           </div>
         </div>
       )}
