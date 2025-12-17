@@ -50,13 +50,7 @@ function formatMood(mood?: string | null): string | null {
   return map[mood] || mood;
 }
 
-function AvatarBubble({
-  user,
-  size = 34,
-}: {
-  user: User | null;
-  size?: number;
-}) {
+function AvatarBubble({ user, size = 34 }: { user: User | null; size?: number }) {
   const border = "1px solid rgba(255,255,255,0.12)";
   const shadow = "0 6px 18px rgba(0,0,0,0.35)";
 
@@ -109,6 +103,20 @@ function AvatarBubble({
   );
 }
 
+function formatTime(value?: any): string {
+  if (!value) return "";
+  try {
+    const d = typeof value === "string" ? new Date(value) : new Date(value);
+    if (Number.isNaN(d.getTime())) return "";
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+    }).format(d);
+  } catch {
+    return "";
+  }
+}
+
 interface ChatWindowProps {
   conversation: Conversation | null;
   messages: Message[];
@@ -141,9 +149,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-    }
+    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [messages]);
 
   if (!conversation) {
@@ -246,13 +252,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               </button>
             )}
             <StatusDot state={other?.state || "OFFLINE"} />
-            <strong
-              style={{
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
+            <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {other?.displayName || "Conversation"}
             </strong>
           </div>
@@ -303,9 +303,20 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const img = isImageUrl(m.content);
           const aud = isAudioUrl(m.content);
 
+          // sender info
           const senderUser: User | null = mine ? currentUser : (m.sender as any) || other || null;
 
-          // Container riga messaggio (avatar + bubble)
+          // time + ticks (ticks only for mine)
+          const timeStr = formatTime((m as any).createdAt);
+          const ticks = mine ? "\u2713\u2713" : ""; // ✓✓ delivered (no read receipts yet)
+
+          // "sfalsato": no bordi estremi
+          // mine: spostato a destra ma non attaccato
+          // others: spostato a sinistra ma non attaccato
+          const rowPaddingStyle = mine
+            ? { marginLeft: "18%", marginRight: 6 }
+            : { marginRight: "18%", marginLeft: 6 };
+
           return (
             <div
               key={m.id}
@@ -313,6 +324,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 display: "flex",
                 justifyContent: mine ? "flex-end" : "flex-start",
                 marginBottom: 10,
+                ...rowPaddingStyle,
               }}
             >
               <div
@@ -324,64 +336,81 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   maxWidth: "100%",
                 }}
               >
-                {/* Avatar */}
                 <AvatarBubble user={senderUser} size={34} />
 
-                {/* Bubble */}
-                <div
-                  style={{
-                    maxWidth: "72vw",
-                    width: "fit-content",
-                    background: mine ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
-                    color: mine ? "#fff" : "var(--tiko-text)",
-                    padding: img || aud ? 8 : 10,
-                    borderRadius: 16,
-                    border: mine ? "1px solid rgba(255,255,255,0.10)" : "1px solid #2a2a2a",
-                    boxShadow: mine
-                      ? "0 10px 24px rgba(122,41,255,0.28)"
-                      : "0 10px 24px rgba(0,0,0,0.28)",
-                    position: "relative",
-                  }}
-                >
-                  {/* Nome mittente sopra (solo per altri utenti, opzionale) */}
-                  {!mine && (
-                    <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginBottom: 4 }}>
-                      {senderUser?.displayName || "User"}
-                    </div>
-                  )}
-
-                  {img ? (
-                    <img
-                      src={m.content}
-                      alt="img"
-                      style={{
-                        maxWidth: "min(320px, 70vw)",
-                        width: "100%",
-                        borderRadius: 12,
-                        display: "block",
-                      }}
-                    />
-                  ) : aud ? (
-                    <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />
-                  ) : (
-                    <div style={{ lineHeight: 1.35, wordBreak: "break-word" }}>{m.content}</div>
-                  )}
-
-                  {/* “Tail” stile messenger (piccolo triangolino) */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
+                  {/* Bubble */}
                   <div
                     style={{
-                      position: "absolute",
-                      bottom: 10,
-                      [mine ? "right" : "left"]: -6,
-                      width: 0,
-                      height: 0,
-                      borderTop: "6px solid transparent",
-                      borderBottom: "6px solid transparent",
-                      borderLeft: mine ? "6px solid transparent" : "6px solid var(--tiko-bg-card)",
-                      borderRight: mine ? "6px solid var(--tiko-purple)" : "6px solid transparent",
-                      filter: "drop-shadow(0 2px 2px rgba(0,0,0,0.25))",
-                    } as any}
-                  />
+                      maxWidth: "72vw",
+                      width: "fit-content",
+                      background: mine ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
+                      color: mine ? "#fff" : "var(--tiko-text)",
+                      padding: img || aud ? 8 : 10,
+                      borderRadius: 16,
+                      border: mine ? "1px solid rgba(255,255,255,0.10)" : "1px solid #2a2a2a",
+                      boxShadow: mine
+                        ? "0 10px 24px rgba(122,41,255,0.28)"
+                        : "0 10px 24px rgba(0,0,0,0.28)",
+                      position: "relative",
+                    }}
+                  >
+                    {!mine && (
+                      <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginBottom: 4 }}>
+                        {senderUser?.displayName || "User"}
+                      </div>
+                    )}
+
+                    {img ? (
+                      <img
+                        src={m.content}
+                        alt="img"
+                        style={{
+                          maxWidth: "min(320px, 70vw)",
+                          width: "100%",
+                          borderRadius: 12,
+                          display: "block",
+                        }}
+                      />
+                    ) : aud ? (
+                      <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />
+                    ) : (
+                      <div style={{ lineHeight: 1.35, wordBreak: "break-word" }}>{m.content}</div>
+                    )}
+
+                    {/* Bubble tail */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 10,
+                        [mine ? "right" : "left"]: -6,
+                        width: 0,
+                        height: 0,
+                        borderTop: "6px solid transparent",
+                        borderBottom: "6px solid transparent",
+                        borderLeft: mine ? "6px solid transparent" : "6px solid var(--tiko-bg-card)",
+                        borderRight: mine ? "6px solid var(--tiko-purple)" : "6px solid transparent",
+                        filter: "drop-shadow(0 2px 2px rgba(0,0,0,0.25))",
+                      } as any}
+                    />
+                  </div>
+
+                  {/* Meta: time + ticks */}
+                  {(timeStr || ticks) && (
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: 11,
+                        color: "var(--tiko-text-dim)",
+                        display: "flex",
+                        gap: 8,
+                        alignItems: "center",
+                      }}
+                    >
+                      {timeStr && <span>{timeStr}</span>}
+                      {ticks && <span style={{ letterSpacing: 1 }}>{ticks}</span>}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
