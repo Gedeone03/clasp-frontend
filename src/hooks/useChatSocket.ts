@@ -1,11 +1,9 @@
-// src/hooks/useChatSocket.ts
-
 import { useEffect, useMemo, useRef } from "react";
 import { io, Socket } from "socket.io-client";
 import { API_BASE_URL } from "../config";
 
 type Events = {
-  onMessage?: (payload: any) => void;
+  onMessage?: (payload: any) => void; // useremo anche per update/delete (upsert)
   onConversationNew?: (payload: any) => void;
   onUserOnline?: (payload: any) => void;
   onUserOffline?: (payload: any) => void;
@@ -13,7 +11,6 @@ type Events = {
 };
 
 function normalizeBaseUrl(url: string) {
-  // evita doppio slash e problemi di trailing slash
   return url.replace(/\/+$/, "");
 }
 
@@ -21,7 +18,6 @@ export function useChatSocket(userId: number | null, events: Events) {
   const socketRef = useRef<Socket | null>(null);
   const eventsRef = useRef<Events>(events);
 
-  // aggiorna sempre i callback senza ricreare socket
   useEffect(() => {
     eventsRef.current = events;
   }, [events]);
@@ -29,20 +25,15 @@ export function useChatSocket(userId: number | null, events: Events) {
   const baseUrl = useMemo(() => normalizeBaseUrl(API_BASE_URL), []);
 
   useEffect(() => {
-    // se non c'è utente loggato, chiudi socket
     if (!userId) {
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      socketRef.current?.disconnect();
+      socketRef.current = null;
       return;
     }
 
-    // crea socket una sola volta
     const socket = io(baseUrl, {
-      transports: ["websocket", "polling"], // IMPORTANTISSIMO per mobile (fallback)
+      transports: ["websocket", "polling"],
       withCredentials: true,
-      autoConnect: true,
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 800,
@@ -53,53 +44,22 @@ export function useChatSocket(userId: number | null, events: Events) {
 
     socketRef.current = socket;
 
-    // listeners principali
-    socket.on("connect", () => {
-      // console.log("socket connected", socket.id);
-    });
+    socket.on("message:new", (payload) => eventsRef.current.onMessage?.(payload));
+    socket.on("message:update", (payload) => eventsRef.current.onMessage?.(payload));
+    socket.on("message:delete", (payload) => eventsRef.current.onMessage?.(payload));
 
-    socket.on("connect_error", (err: any) => {
-      console.warn("socket connect_error:", err?.message || err);
-    });
+    socket.on("conversation:new", (payload) => eventsRef.current.onConversationNew?.(payload));
+    socket.on("user:online", (payload) => eventsRef.current.onUserOnline?.(payload));
+    socket.on("user:offline", (payload) => eventsRef.current.onUserOffline?.(payload));
+    socket.on("user:typing", (payload) => eventsRef.current.onTyping?.(payload));
 
-    socket.on("disconnect", (reason) => {
-      console.warn("socket disconnected:", reason);
-    });
-
-    socket.on("message:new", (payload) => {
-      eventsRef.current.onMessage?.(payload);
-    });
-
-    socket.on("conversation:new", (payload) => {
-      eventsRef.current.onConversationNew?.(payload);
-    });
-
-    socket.on("user:online", (payload) => {
-      eventsRef.current.onUserOnline?.(payload);
-    });
-
-    socket.on("user:offline", (payload) => {
-      eventsRef.current.onUserOffline?.(payload);
-    });
-
-    socket.on("user:typing", (payload) => {
-      eventsRef.current.onTyping?.(payload);
-    });
-
-    // ✅ Fix mobile/PWA: quando l'app torna visibile, forza reconnect
     const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        if (socketRef.current && !socketRef.current.connected) {
-          socketRef.current.connect();
-        }
-      }
-    };
-
-    // ✅ Fix mobile rete ballerina: se cambia rete, prova a reconnect
-    const handleOnline = () => {
-      if (socketRef.current && !socketRef.current.connected) {
+      if (document.visibilityState === "visible" && socketRef.current && !socketRef.current.connected) {
         socketRef.current.connect();
       }
+    };
+    const handleOnline = () => {
+      if (socketRef.current && !socketRef.current.connected) socketRef.current.connect();
     };
 
     document.addEventListener("visibilitychange", handleVisibility);
@@ -115,24 +75,12 @@ export function useChatSocket(userId: number | null, events: Events) {
     };
   }, [userId, baseUrl]);
 
-  // API usata da HomePage
   const api = useMemo(() => {
     return {
-      joinConversation: (conversationId: number) => {
-        if (!socketRef.current) return;
-        socketRef.current.emit("conversation:join", { conversationId });
-      },
-      sendMessage: (conversationId: number, content: string) => {
-        if (!socketRef.current) return;
-        socketRef.current.emit("message:send", { conversationId, content });
-      },
-      sendTyping: (conversationId: number) => {
-        if (!socketRef.current) return;
-        socketRef.current.emit("typing", { conversationId });
-      },
-      get connected() {
-        return !!socketRef.current?.connected;
-      },
+      joinConversation: (conversationId: number) => socketRef.current?.emit("conversation:join", { conversationId }),
+      sendMessage: (conversationId: number, content: string, replyToId?: number | null) =>
+        socketRef.current?.emit("message:send", { conversationId, content, replyToId: replyToId ?? null }),
+      sendTyping: (conversationId: number) => socketRef.current?.emit("typing", { conversationId }),
     };
   }, []);
 
