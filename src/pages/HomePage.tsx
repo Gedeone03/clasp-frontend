@@ -1,6 +1,6 @@
 // src/pages/HomePage.tsx
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
@@ -23,6 +23,15 @@ import { useAuth } from "../AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { useI18n } from "../LanguageContext";
 
+type MessageLike = Message & {
+  createdAt?: string;
+  editedAt?: string | null;
+  deletedAt?: string | null;
+  replyToId?: number | null;
+  replyTo?: any | null;
+  sender?: any | null;
+};
+
 function useIsMobile(breakpointPx: number = 900) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
 
@@ -35,6 +44,29 @@ function useIsMobile(breakpointPx: number = 900) {
   return isMobile;
 }
 
+function toTimeMs(v: any): number {
+  if (!v) return 0;
+  try {
+    const d = new Date(v);
+    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+  } catch {
+    return 0;
+  }
+}
+
+function upsertMessage(list: MessageLike[], msg: MessageLike): MessageLike[] {
+  const idx = list.findIndex((m) => m.id === msg.id);
+  let next: MessageLike[];
+  if (idx >= 0) {
+    next = [...list];
+    next[idx] = { ...next[idx], ...msg };
+  } else {
+    next = [...list, msg];
+  }
+  next.sort((a, b) => toTimeMs((a as any).createdAt) - toTimeMs((b as any).createdAt));
+  return next;
+}
+
 const HomePage: React.FC = () => {
   const { user } = useAuth();
   const { t } = useI18n();
@@ -42,17 +74,15 @@ const HomePage: React.FC = () => {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const [messages, setMessages] = useState<MessageLike[]>([]);
   const [typingUserId, setTypingUserId] = useState<number | null>(null);
 
   // Mobile views
   const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
   const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
-
-  // Drawer per switch chat su mobile (solo se NON in focus mode)
   const [mobileChatsDrawerOpen, setMobileChatsDrawerOpen] = useState(false);
 
-  // ✅ Focus mode: mostra SOLO la conversazione richiesta
+  // Focus mode
   const [focusMode, setFocusMode] = useState(false);
   const [focusConvId, setFocusConvId] = useState<number | null>(null);
 
@@ -71,7 +101,7 @@ const HomePage: React.FC = () => {
 
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // ✅ Leggi query param UNA volta
+  // Read query params once
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const convIdStr = params.get("convId");
@@ -94,7 +124,7 @@ const HomePage: React.FC = () => {
       const list = await fetchConversations();
       setConversations(list);
 
-      // Desktop: seleziona la prima chat solo se non in focus
+      // Desktop: select first if none AND not focus mode
       if (!isMobile && !focusMode && !selectedConversation && list.length > 0) {
         setSelectedConversation(list[0]);
         loadMessages(list[0].id);
@@ -107,7 +137,7 @@ const HomePage: React.FC = () => {
   const loadMessages = async (convId: number) => {
     try {
       const msgs = await fetchMessages(convId);
-      setMessages(msgs);
+      setMessages(msgs as any);
     } catch (err) {
       console.error(err);
     }
@@ -138,26 +168,34 @@ const HomePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ✅ Se focusConvId è impostato, seleziona quella chat quando arrivano le conversazioni
+  // If focusConvId is set, select that conversation when list arrives
   useEffect(() => {
     if (!focusConvId) return;
     const found = conversations.find((c) => c.id === focusConvId);
     if (found) setSelectedConversation(found);
   }, [conversations, focusConvId]);
 
-  // Socket
+  // SOCKET (realtime)
   const socket = useChatSocket(user ? user.id : null, {
+    // IMPORTANT: onMessage will receive message:new, message:update, message:delete
     onMessage: ({ conversationId, message }) => {
-      if (selectedConversation?.id === conversationId) {
-        setMessages((prev) => [...prev, message]);
-      }
+      // always refresh conversation list (for last message preview)
       loadConversations();
+
+      // update currently opened conversation messages
+      if (selectedConversation?.id === Number(conversationId)) {
+        setMessages((prev) => upsertMessage(prev, message));
+      }
     },
+
     onConversationNew: () => loadConversations(),
+
     onUserOnline: () => loadConversations(),
+
     onUserOffline: () => loadConversations(),
+
     onTyping: ({ conversationId, userId }) => {
-      if (conversationId !== selectedConversation?.id) return;
+      if (Number(conversationId) !== selectedConversation?.id) return;
 
       setTypingUserId(userId);
       if (typingTimeout.current) clearTimeout(typingTimeout.current);
@@ -166,6 +204,7 @@ const HomePage: React.FC = () => {
     },
   });
 
+  // Join conversation room + load messages when selection changes
   useEffect(() => {
     if (!selectedConversation) return;
 
@@ -176,9 +215,16 @@ const HomePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversation]);
 
+  // Send message normal
   const handleSend = (content: string) => {
     if (!selectedConversation) return;
-    socket.sendMessage(selectedConversation.id, content);
+    socket.sendMessage(selectedConversation.id, content, null);
+  };
+
+  // Send message with replyToId (NEW)
+  const handleSendWithReply = (content: string, replyToId: number | null) => {
+    if (!selectedConversation) return;
+    socket.sendMessage(selectedConversation.id, content, replyToId ?? null);
   };
 
   const handleTyping = () => {
@@ -197,6 +243,7 @@ const HomePage: React.FC = () => {
       await loadConversations();
       setSelectedConversation(null);
       setMessages([]);
+
       if (isMobile) setMobileScreen("list");
     } catch (err) {
       console.error(err);
@@ -223,7 +270,7 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // Start chat from search (normal mode)
+  // Start chat with user (from search)
   const startChatWithUser = async (u: User) => {
     try {
       const conv = await createConversation(u.id);
@@ -264,13 +311,13 @@ const HomePage: React.FC = () => {
 
   if (!user) return <div>Not authenticated</div>;
 
-  // ✅ Se focusMode è ON, la lista conversazioni è SOLO quella
+  // Focus list
   const conversationsForList =
     focusMode && focusConvId
       ? conversations.filter((c) => c.id === focusConvId)
       : conversations;
 
-  // Mobile drawer chats (disabilitato in focusMode)
+  // Mobile chats drawer (only if NOT focusMode)
   const MobileChatsDrawer =
     !focusMode && mobileChatsDrawerOpen ? (
       <div
@@ -459,14 +506,13 @@ const HomePage: React.FC = () => {
 
   const ChatsPanel = (
     <div style={{ flex: 1, minHeight: 0 }}>
-      {/* In focusMode la lista contiene SOLO quella chat */}
       <ConversationList
         conversations={conversationsForList}
         selectedConversationId={selectedConversation?.id ?? null}
         onSelect={(conv) => setSelectedConversation(conv)}
       />
 
-      {/* Bottone uscita focus */}
+      {/* exit focus */}
       {focusMode && (
         <div style={{ padding: 10 }}>
           <button
@@ -478,7 +524,6 @@ const HomePage: React.FC = () => {
               url.searchParams.delete("convId");
               url.searchParams.delete("focus");
               window.history.replaceState({}, "", url.toString());
-              // torna a vedere tutte le chat
               loadConversations();
             }}
             style={{ width: "100%" }}
@@ -505,7 +550,6 @@ const HomePage: React.FC = () => {
           </div>
         ) : (
           <div style={{ height: "100vh", position: "relative" }}>
-            {/* switch rapido chat SOLO se non focus */}
             {!focusMode && (
               <button
                 type="button"
@@ -539,6 +583,7 @@ const HomePage: React.FC = () => {
               currentUser={user}
               typingUserId={typingUserId}
               onSend={handleSend}
+              onSendWithReply={handleSendWithReply}
               onTyping={handleTyping}
               onDeleteConversation={handleDeleteConversation}
               onBack={() => {
@@ -589,7 +634,6 @@ const HomePage: React.FC = () => {
             </form>
           </div>
 
-          {/* Desktop list: focusMode mostra solo 1 chat */}
           <div style={{ flex: 1, minHeight: 0 }}>
             <ConversationList
               conversations={conversationsForList}
@@ -626,6 +670,7 @@ const HomePage: React.FC = () => {
             currentUser={user}
             typingUserId={typingUserId}
             onSend={handleSend}
+            onSendWithReply={handleSendWithReply}
             onTyping={handleTyping}
             onDeleteConversation={handleDeleteConversation}
           />
