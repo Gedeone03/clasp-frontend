@@ -49,6 +49,9 @@ const HomePage: React.FC = () => {
   const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
   const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
 
+  // ✅ NEW: overlay per switch veloce chat mentre sei in chat
+  const [mobileChatsDrawerOpen, setMobileChatsDrawerOpen] = useState(false);
+
   // Search
   const [searchTerm, setSearchTerm] = useState("");
   const [searchVisibleOnly, setSearchVisibleOnly] = useState(false);
@@ -69,7 +72,6 @@ const HomePage: React.FC = () => {
       const list = await fetchConversations();
       setConversations(list);
 
-      // desktop: seleziona prima chat se nessuna selezionata
       if (!isMobile && !selectedConversation && list.length > 0) {
         setSelectedConversation(list[0]);
         loadMessages(list[0].id);
@@ -191,7 +193,7 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // ✅ FIX: Start chat deve selezionare la conversazione e aprire la chat
+  // Start chat: seleziona subito la conversazione e apre chat
   const startChatWithUser = async (u: User) => {
     try {
       const conv = await createConversation(u.id);
@@ -362,6 +364,73 @@ const HomePage: React.FC = () => {
     </div>
   );
 
+  // ✅ Drawer Chats overlay (solo quando sei dentro la chat su mobile)
+  const MobileChatsDrawer = mobileChatsDrawerOpen ? (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 12000,
+        background: "rgba(0,0,0,0.55)",
+        display: "flex",
+      }}
+      onClick={() => setMobileChatsDrawerOpen(false)}
+    >
+      <div
+        style={{
+          width: 320,
+          maxWidth: "90vw",
+          height: "100%",
+          background: "var(--tiko-bg-dark)",
+          borderRight: "1px solid #222",
+          boxShadow: "0 0 24px rgba(0,0,0,0.6)",
+          display: "flex",
+          flexDirection: "column",
+        }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div
+          style={{
+            padding: 12,
+            borderBottom: "1px solid #222",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            background: "var(--tiko-bg-gray)",
+          }}
+        >
+          <strong>Chats</strong>
+          <button
+            type="button"
+            onClick={() => setMobileChatsDrawerOpen(false)}
+            style={{
+              border: "1px solid #444",
+              background: "transparent",
+              borderRadius: 10,
+              padding: "6px 10px",
+              cursor: "pointer",
+              color: "#fff",
+            }}
+          >
+            Close
+          </button>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <ConversationList
+            conversations={conversations}
+            selectedConversationId={selectedConversation?.id ?? null}
+            onSelect={(conv) => {
+              setSelectedConversation(conv);
+              setMobileChatsDrawerOpen(false);
+            }}
+          />
+        </div>
+      </div>
+    </div>
+  ) : null;
+
+  // MOBILE
   if (isMobile) {
     return (
       <div style={{ height: "100vh", background: "var(--tiko-bg-dark)" }}>
@@ -375,7 +444,33 @@ const HomePage: React.FC = () => {
             </div>
           </div>
         ) : (
-          <div style={{ height: "100vh" }}>
+          <div style={{ height: "100vh", position: "relative" }}>
+            {/* pulsante rapido per switch chat */}
+            <button
+              type="button"
+              onClick={() => setMobileChatsDrawerOpen(true)}
+              style={{
+                position: "fixed",
+                top: "calc(env(safe-area-inset-top, 0px) + 10px)",
+                right: "calc(env(safe-area-inset-right, 0px) + 10px)",
+                zIndex: 11000,
+                background: "var(--tiko-bg-card)",
+                border: "1px solid #333",
+                borderRadius: 12,
+                padding: "10px 12px",
+                fontSize: 13,
+                fontWeight: 700,
+                cursor: "pointer",
+                boxShadow: "var(--tiko-glow)",
+                color: "#fff",
+              }}
+              title="Switch chat"
+            >
+              Chats
+            </button>
+
+            {MobileChatsDrawer}
+
             <ChatWindow
               conversation={selectedConversation}
               messages={messages}
@@ -384,7 +479,10 @@ const HomePage: React.FC = () => {
               onSend={handleSend}
               onTyping={handleTyping}
               onDeleteConversation={handleDeleteConversation}
-              onBack={() => setMobileScreen("list")}
+              onBack={() => {
+                setMobileTab("chats");
+                setMobileScreen("list");
+              }}
             />
           </div>
         )}
@@ -392,7 +490,7 @@ const HomePage: React.FC = () => {
     );
   }
 
-  // Desktop
+  // DESKTOP
   return (
     <div className="tiko-layout" style={{ height: "100vh", overflow: "hidden" }}>
       <Sidebar />
