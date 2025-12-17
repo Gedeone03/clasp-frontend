@@ -45,9 +45,11 @@ const HomePage: React.FC = () => {
   const [messages, setMessages] = useState<Message[]>([]);
   const [typingUserId, setTypingUserId] = useState<number | null>(null);
 
+  // Mobile views
   const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
   const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
 
+  // Search
   const [searchTerm, setSearchTerm] = useState("");
   const [searchVisibleOnly, setSearchVisibleOnly] = useState(false);
   const [searchResults, setSearchResults] = useState<User[]>([]);
@@ -56,6 +58,7 @@ const HomePage: React.FC = () => {
 
   const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
 
+  // Relationship cache
   const [friendIds, setFriendIds] = useState<Set<number>>(new Set());
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
 
@@ -66,6 +69,7 @@ const HomePage: React.FC = () => {
       const list = await fetchConversations();
       setConversations(list);
 
+      // desktop: seleziona prima chat se nessuna selezionata
       if (!isMobile && !selectedConversation && list.length > 0) {
         setSelectedConversation(list[0]);
         loadMessages(list[0].id);
@@ -109,6 +113,7 @@ const HomePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Socket
   const socket = useChatSocket(user ? user.id : null, {
     onMessage: ({ conversationId, message }) => {
       if (selectedConversation?.id === conversationId) {
@@ -186,11 +191,17 @@ const HomePage: React.FC = () => {
     }
   };
 
+  // ✅ FIX: Start chat deve selezionare la conversazione e aprire la chat
   const startChatWithUser = async (u: User) => {
     try {
-      await createConversation(u.id);
+      const conv = await createConversation(u.id);
       await loadConversations();
-      if (isMobile) setMobileTab("chats");
+      setSelectedConversation(conv);
+
+      if (isMobile) {
+        setMobileTab("chats");
+        setMobileScreen("chat");
+      }
     } catch (err) {
       console.error(err);
       alert("Error creating chat");
@@ -351,94 +362,94 @@ const HomePage: React.FC = () => {
     </div>
   );
 
-  return (
-    <div style={{ height: "100vh", background: "var(--tiko-bg-dark)" }}>
-      {/* Hamburger menu lives here */}
-      <Sidebar />
+  if (isMobile) {
+    return (
+      <div style={{ height: "100vh", background: "var(--tiko-bg-dark)" }}>
+        <Sidebar />
 
-      {/* Mobile */}
-      {isMobile ? (
-        <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-          {mobileScreen === "list" ? (
-            <>
-              {MobileTopTabs}
-              <div style={{ flex: 1, overflowY: "auto" }}>
-                {mobileTab === "search" ? SearchPanel : ChatsPanel}
-              </div>
-            </>
-          ) : (
-            <div style={{ height: "100%" }}>
-              <ChatWindow
-                conversation={selectedConversation}
-                messages={messages}
-                currentUser={user}
-                typingUserId={typingUserId}
-                onSend={handleSend}
-                onTyping={handleTyping}
-                onDeleteConversation={handleDeleteConversation}
-                onBack={() => setMobileScreen("list")}
-              />
-            </div>
-          )}
-        </div>
-      ) : (
-        // Desktop
-        <div className="tiko-layout" style={{ height: "100vh", overflow: "hidden" }}>
-          <div style={{ flex: 1, display: "flex", minWidth: 0, height: "100%" }}>
-            <div
-              style={{
-                width: 340,
-                borderRight: "1px solid #222",
-                display: "flex",
-                flexDirection: "column",
-                background: "var(--tiko-bg-gray)",
-                minWidth: 0,
-                height: "100%",
-              }}
-            >
-              <div style={{ padding: 12, borderBottom: "1px solid #222" }}>
-                <form onSubmit={handleSearchUsers} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                  <input
-                    placeholder={t("homeSearchPlaceholder")}
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                  <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                    <input
-                      type="checkbox"
-                      checked={searchVisibleOnly}
-                      onChange={(e) => setSearchVisibleOnly(e.target.checked)}
-                      style={{ marginRight: 6 }}
-                    />
-                    {t("homeVisibleOnly")}
-                  </label>
-                  <button disabled={searchLoading}>{t("homeSearchButton")}</button>
-                </form>
-              </div>
-
-              <div style={{ flex: 1, minHeight: 0 }}>
-                <ConversationList
-                  conversations={conversations}
-                  selectedConversationId={selectedConversation?.id ?? null}
-                  onSelect={(conv) => setSelectedConversation(conv)}
-                />
-              </div>
-            </div>
-
-            <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-              <ChatWindow
-                conversation={selectedConversation}
-                messages={messages}
-                currentUser={user}
-                typingUserId={typingUserId}
-                onSend={handleSend}
-                onTyping={handleTyping}
-                onDeleteConversation={handleDeleteConversation}
-              />
+        {mobileScreen === "list" ? (
+          <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+            {MobileTopTabs}
+            <div style={{ flex: 1, overflowY: "auto" }}>
+              {mobileTab === "search" ? SearchPanel : ChatsPanel}
             </div>
           </div>
+        ) : (
+          <div style={{ height: "100vh" }}>
+            <ChatWindow
+              conversation={selectedConversation}
+              messages={messages}
+              currentUser={user}
+              typingUserId={typingUserId}
+              onSend={handleSend}
+              onTyping={handleTyping}
+              onDeleteConversation={handleDeleteConversation}
+              onBack={() => setMobileScreen("list")}
+            />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Desktop
+  return (
+    <div className="tiko-layout" style={{ height: "100vh", overflow: "hidden" }}>
+      <Sidebar />
+
+      <div style={{ flex: 1, display: "flex", minWidth: 0, height: "100%" }}>
+        <div
+          style={{
+            width: 340,
+            borderRight: "1px solid #222",
+            display: "flex",
+            flexDirection: "column",
+            background: "var(--tiko-bg-gray)",
+            minWidth: 0,
+            height: "100%",
+          }}
+        >
+          <div style={{ padding: 12, borderBottom: "1px solid #222" }}>
+            <form onSubmit={handleSearchUsers} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <input
+                placeholder={t("homeSearchPlaceholder")}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                <input
+                  type="checkbox"
+                  checked={searchVisibleOnly}
+                  onChange={(e) => setSearchVisibleOnly(e.target.checked)}
+                  style={{ marginRight: 6 }}
+                />
+                {t("homeVisibleOnly")}
+              </label>
+              <button disabled={searchLoading}>{t("homeSearchButton")}</button>
+            </form>
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ConversationList
+              conversations={conversations}
+              selectedConversationId={selectedConversation?.id ?? null}
+              onSelect={(conv) => setSelectedConversation(conv)}
+            />
+          </div>
         </div>
-      )}
+
+        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
+          <ChatWindow
+            conversation={selectedConversation}
+            messages={messages}
+            currentUser={user}
+            typingUserId={typingUserId}
+            onSend={handleSend}
+            onTyping={handleTyping}
+            onDeleteConversation={handleDeleteConversation}
+          />
+        </div>
+      </div>
     </div>
   );
 };
