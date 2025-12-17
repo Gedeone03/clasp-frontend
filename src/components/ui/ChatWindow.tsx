@@ -1,6 +1,6 @@
 // src/components/ui/ChatWindow.tsx
 
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Conversation, Message, User, uploadImage, uploadAudio } from "../../api";
 
 function StatusDot({ state }: { state: string }) {
@@ -108,13 +108,20 @@ function formatTime(value?: any): string {
   try {
     const d = typeof value === "string" ? new Date(value) : new Date(value);
     if (Number.isNaN(d.getTime())) return "";
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(d);
+    return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(d);
   } catch {
     return "";
   }
+}
+
+function useIsMobile(breakpointPx: number = 900) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
+  useEffect(() => {
+    const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [breakpointPx]);
+  return isMobile;
 }
 
 interface ChatWindowProps {
@@ -138,6 +145,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   onDeleteConversation,
   onBack,
 }) => {
+  const isMobile = useIsMobile(900);
+
+  // sfalsamento: mobile più ampio, desktop più “elegante”
+  const STAGGER = isMobile ? 25 : 14;
+
   const [input, setInput] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -246,9 +258,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   borderRadius: 10,
                   padding: "6px 10px",
                   cursor: "pointer",
+                  fontWeight: 800,
                 }}
+                aria-label="Back"
               >
-                Back
+                ←
               </button>
             )}
             <StatusDot state={other?.state || "OFFLINE"} />
@@ -303,19 +317,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const img = isImageUrl(m.content);
           const aud = isAudioUrl(m.content);
 
-          // sender info
           const senderUser: User | null = mine ? currentUser : (m.sender as any) || other || null;
 
-          // time + ticks (ticks only for mine)
           const timeStr = formatTime((m as any).createdAt);
-          const ticks = mine ? "\u2713\u2713" : ""; // ✓✓ delivered (no read receipts yet)
+          const ticks = mine ? "\u2713\u2713" : ""; // ✓✓ delivered
 
-          // "sfalsato": no bordi estremi
-          // mine: spostato a destra ma non attaccato
-          // others: spostato a sinistra ma non attaccato
           const rowPaddingStyle = mine
-            ? { marginLeft: "25%", marginRight: 6 }
-            : { marginRight: "25%", marginLeft: 6 };
+            ? { marginLeft: `${STAGGER}%`, marginRight: 6 }
+            : { marginRight: `${STAGGER}%`, marginLeft: 6 };
 
           return (
             <div
@@ -339,7 +348,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                 <AvatarBubble user={senderUser} size={34} />
 
                 <div style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
-                  {/* Bubble */}
                   <div
                     style={{
                       maxWidth: "72vw",
@@ -365,12 +373,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       <img
                         src={m.content}
                         alt="img"
-                        style={{
-                          maxWidth: "min(320px, 70vw)",
-                          width: "100%",
-                          borderRadius: 12,
-                          display: "block",
-                        }}
+                        style={{ maxWidth: "min(320px, 70vw)", width: "100%", borderRadius: 12, display: "block" }}
                       />
                     ) : aud ? (
                       <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />
@@ -378,7 +381,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                       <div style={{ lineHeight: 1.35, wordBreak: "break-word" }}>{m.content}</div>
                     )}
 
-                    {/* Bubble tail */}
                     <div
                       style={{
                         position: "absolute",
@@ -395,7 +397,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                     />
                   </div>
 
-                  {/* Meta: time + ticks */}
                   {(timeStr || ticks) && (
                     <div
                       style={{
@@ -459,9 +460,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         </button>
       </form>
 
-      {(uploadingImage || uploadingAudio) && (
-        <div style={{ fontSize: 12, padding: 6 }}>Sending…</div>
-      )}
+      {(uploadingImage || uploadingAudio) && <div style={{ fontSize: 12, padding: 6 }}>Sending…</div>}
     </div>
   );
 };
