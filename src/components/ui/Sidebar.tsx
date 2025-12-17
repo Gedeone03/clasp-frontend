@@ -99,7 +99,13 @@ const SidebarContent: React.FC<{
           <img
             src={user.avatarUrl}
             alt="Avatar"
-            style={{ width: 42, height: 42, borderRadius: "50%", objectFit: "cover", border: "2px solid var(--tiko-purple)" }}
+            style={{
+              width: 42,
+              height: 42,
+              borderRadius: "50%",
+              objectFit: "cover",
+              border: "2px solid var(--tiko-purple)",
+            }}
           />
         ) : (
           <div
@@ -218,7 +224,8 @@ const Sidebar: React.FC = () => {
   if (!user) return null;
 
   if (!isMobile) {
-    return <SidebarContent receivedCount={receivedCount} />Menu</button>
+    return <SidebarContent receivedCount={receivedCount} />;
+  }
 
   return (
     <>
