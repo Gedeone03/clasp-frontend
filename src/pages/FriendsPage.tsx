@@ -8,11 +8,13 @@ import {
   fetchFriendRequestsSent,
   acceptFriendRequest,
   declineFriendRequest,
+  createConversation,
   User,
   FriendRequest,
 } from "../api";
 import { useAuth } from "../AuthContext";
 import { useI18n } from "../LanguageContext";
+import { useNavigate } from "react-router-dom";
 
 function StatusDot({ state }: { state: string }) {
   const colors: Record<string, string> = {
@@ -85,6 +87,7 @@ function getMoodColor(mood?: string | null): string {
 const FriendsPage: React.FC = () => {
   const { user } = useAuth();
   const { t } = useI18n();
+  const navigate = useNavigate();
 
   const [friends, setFriends] = useState<User[]>([]);
   const [received, setReceived] = useState<FriendRequest[]>([]);
@@ -145,6 +148,17 @@ const FriendsPage: React.FC = () => {
     } catch (err) {
       console.error(err);
       setError(t("friendsErrorLoad"));
+    }
+  };
+
+  // ✅ click su amico = crea/apri conversazione e vai in Home
+  const openChatWithFriend = async (friend: User) => {
+    try {
+      const conv = await createConversation(friend.id);
+      navigate(`/?convId=${conv.id}`);
+    } catch (e) {
+      console.error(e);
+      alert("Error opening chat");
     }
   };
 
@@ -219,16 +233,18 @@ const FriendsPage: React.FC = () => {
                   <div
                     key={f.id}
                     className="tiko-hover-item"
+                    onClick={() => openChatWithFriend(f)}
                     style={{
                       display: "flex",
                       alignItems: "center",
                       gap: 10,
                       padding: 10,
                       borderRadius: 10,
+                      cursor: "pointer",
                     }}
+                    title="Open chat"
                   >
                     <Avatar user={f} />
-
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center" }}>
                         <StatusDot state={f.state} />
@@ -257,6 +273,17 @@ const FriendsPage: React.FC = () => {
                         {f.interests?.length ? `Interests: ${f.interests.join(", ")}` : ""}
                       </div>
                     </div>
+
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        openChatWithFriend(f);
+                      }}
+                      style={{ fontSize: 12 }}
+                    >
+                      Chat
+                    </button>
                   </div>
                 );
               })}
@@ -294,7 +321,6 @@ const FriendsPage: React.FC = () => {
                     }}
                   >
                     <Avatar user={sender} />
-
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center" }}>
                         <StatusDot state={sender.state} />
@@ -384,7 +410,6 @@ const FriendsPage: React.FC = () => {
                     }}
                   >
                     <Avatar user={receiver} />
-
                     <div style={{ flex: 1 }}>
                       <div style={{ display: "flex", alignItems: "center" }}>
                         <StatusDot state={receiver.state} />

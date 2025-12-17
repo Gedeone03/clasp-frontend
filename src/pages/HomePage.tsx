@@ -71,6 +71,25 @@ const HomePage: React.FC = () => {
     try {
       const list = await fetchConversations();
       setConversations(list);
+  // Se arrivo da FriendsPage con ?convId=123, seleziono quella chat
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const convIdStr = params.get("convId");
+    const convId = convIdStr ? Number(convIdStr) : null;
+    if (!convId || Number.isNaN(convId)) return;
+
+    // quando conversations sono caricate, selezioniamo quella
+    const found = conversations.find((c) => c.id === convId);
+    if (found) {
+      setSelectedConversation(found);
+      if (window.location.search.includes("convId=")) {
+        // pulizia URL (opzionale)
+        const url = new URL(window.location.href);
+        url.searchParams.delete("convId");
+        window.history.replaceState({}, "", url.toString());
+      }
+    }
+  }, [conversations]);
 
       if (!isMobile && !selectedConversation && list.length > 0) {
         setSelectedConversation(list[0]);
