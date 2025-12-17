@@ -12,7 +12,6 @@ function StatusDot({ state }: { state: string }) {
     INVISIBILE: "#BDBDBD",
     VISIBILE_A_TUTTI: "#2196F3",
   };
-
   return (
     <span
       style={{
@@ -25,6 +24,13 @@ function StatusDot({ state }: { state: string }) {
       }}
     />
   );
+}
+
+function isImageUrl(content: string): boolean {
+  return /^(https?:\/\/|\/).+\.(png|jpe?g|gif|webp|avif|svg)$/i.test(content);
+}
+function isAudioUrl(content: string): boolean {
+  return /^(https?:\/\/|\/).+\.(mp3|ogg|wav|webm|m4a)$/i.test(content);
 }
 
 function formatMood(mood?: string | null): string | null {
@@ -44,11 +50,63 @@ function formatMood(mood?: string | null): string | null {
   return map[mood] || mood;
 }
 
-function isImageUrl(content: string): boolean {
-  return /^(https?:\/\/|\/).+\.(png|jpe?g|gif|webp|avif|svg)$/i.test(content);
-}
-function isAudioUrl(content: string): boolean {
-  return /^(https?:\/\/|\/).+\.(mp3|ogg|wav|webm|m4a)$/i.test(content);
+function AvatarBubble({
+  user,
+  size = 34,
+}: {
+  user: User | null;
+  size?: number;
+}) {
+  const border = "1px solid rgba(255,255,255,0.12)";
+  const shadow = "0 6px 18px rgba(0,0,0,0.35)";
+
+  if (user?.avatarUrl) {
+    return (
+      <img
+        src={user.avatarUrl}
+        alt="avatar"
+        style={{
+          width: size,
+          height: size,
+          borderRadius: "50%",
+          objectFit: "cover",
+          border,
+          boxShadow: shadow,
+          flex: "0 0 auto",
+        }}
+      />
+    );
+  }
+
+  const initials = (user?.displayName || user?.username || "?")
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+
+  return (
+    <div
+      style={{
+        width: size,
+        height: size,
+        borderRadius: "50%",
+        border,
+        boxShadow: shadow,
+        background: "linear-gradient(140deg, var(--tiko-purple), var(--tiko-blue))",
+        color: "#fff",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        fontWeight: 800,
+        fontSize: Math.max(12, Math.floor(size * 0.35)),
+        flex: "0 0 auto",
+        userSelect: "none",
+      }}
+    >
+      {initials}
+    </div>
+  );
 }
 
 interface ChatWindowProps {
@@ -59,7 +117,7 @@ interface ChatWindowProps {
   onSend: (content: string) => void;
   onTyping: () => void;
   onDeleteConversation?: () => void;
-  onBack?: () => void; // ✅ mobile back
+  onBack?: () => void; // mobile back
 }
 
 const ChatWindow: React.FC<ChatWindowProps> = ({
@@ -83,15 +141,13 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
   const audioChunksRef = useRef<Blob[]>([]);
 
   useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
   }, [messages]);
 
   if (!conversation) {
-    return (
-      <div style={{ height: "100%", padding: 24 }}>
-        Select a conversation
-      </div>
-    );
+    return <div style={{ height: "100%", padding: 24 }}>Select a conversation</div>;
   }
 
   const other =
@@ -173,7 +229,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
         }}
       >
         <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {onBack && (
               <button
                 type="button"
@@ -182,7 +238,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
                   border: "1px solid #444",
                   background: "transparent",
                   borderRadius: 10,
-                  padding: "4px 8px",
+                  padding: "6px 10px",
                   cursor: "pointer",
                 }}
               >
@@ -190,18 +246,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               </button>
             )}
             <StatusDot state={other?.state || "OFFLINE"} />
-            <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+            <strong
+              style={{
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
               {other?.displayName || "Conversation"}
             </strong>
           </div>
 
-          <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
             {otherMood ? `Mood: ${otherMood} • ` : ""}
             {other?.interests?.length ? `Interests: ${other.interests.join(", ")}` : ""}
           </div>
 
           {typingUserId && typingUserId !== currentUser.id && (
-            <div style={{ fontSize: 12, color: "var(--tiko-blue)" }}>
+            <div style={{ fontSize: 12, color: "var(--tiko-blue)", marginTop: 4 }}>
               Typing…
             </div>
           )}
@@ -214,7 +276,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
               border: "1px solid #444",
               background: "transparent",
               borderRadius: 20,
-              padding: "4px 10px",
+              padding: "6px 12px",
               cursor: "pointer",
               whiteSpace: "nowrap",
             }}
@@ -232,9 +294,6 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           flex: 1,
           padding: 16,
           overflowY: "auto",
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
           background: "var(--tiko-bg-dark)",
           minHeight: 0,
         }}
@@ -244,24 +303,86 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           const img = isImageUrl(m.content);
           const aud = isAudioUrl(m.content);
 
+          const senderUser: User | null = mine ? currentUser : (m.sender as any) || other || null;
+
+          // Container riga messaggio (avatar + bubble)
           return (
-            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start" }}>
+            <div
+              key={m.id}
+              style={{
+                display: "flex",
+                justifyContent: mine ? "flex-end" : "flex-start",
+                marginBottom: 10,
+              }}
+            >
               <div
                 style={{
-                  maxWidth: "70%",
-                  padding: 10,
-                  borderRadius: 14,
-                  background: mine ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
-                  color: mine ? "#fff" : "var(--tiko-text)",
+                  display: "flex",
+                  flexDirection: mine ? "row-reverse" : "row",
+                  alignItems: "flex-end",
+                  gap: 10,
+                  maxWidth: "100%",
                 }}
               >
-                {img ? (
-                  <img src={m.content} style={{ maxWidth: "100%", borderRadius: 10 }} />
-                ) : aud ? (
-                  <audio controls src={m.content} style={{ width: "100%" }} />
-                ) : (
-                  <div>{m.content}</div>
-                )}
+                {/* Avatar */}
+                <AvatarBubble user={senderUser} size={34} />
+
+                {/* Bubble */}
+                <div
+                  style={{
+                    maxWidth: "72vw",
+                    width: "fit-content",
+                    background: mine ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
+                    color: mine ? "#fff" : "var(--tiko-text)",
+                    padding: img || aud ? 8 : 10,
+                    borderRadius: 16,
+                    border: mine ? "1px solid rgba(255,255,255,0.10)" : "1px solid #2a2a2a",
+                    boxShadow: mine
+                      ? "0 10px 24px rgba(122,41,255,0.28)"
+                      : "0 10px 24px rgba(0,0,0,0.28)",
+                    position: "relative",
+                  }}
+                >
+                  {/* Nome mittente sopra (solo per altri utenti, opzionale) */}
+                  {!mine && (
+                    <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginBottom: 4 }}>
+                      {senderUser?.displayName || "User"}
+                    </div>
+                  )}
+
+                  {img ? (
+                    <img
+                      src={m.content}
+                      alt="img"
+                      style={{
+                        maxWidth: "min(320px, 70vw)",
+                        width: "100%",
+                        borderRadius: 12,
+                        display: "block",
+                      }}
+                    />
+                  ) : aud ? (
+                    <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />
+                  ) : (
+                    <div style={{ lineHeight: 1.35, wordBreak: "break-word" }}>{m.content}</div>
+                  )}
+
+                  {/* “Tail” stile messenger (piccolo triangolino) */}
+                  <div
+                    style={{
+                      position: "absolute",
+                      bottom: 10,
+                      [mine ? "right" : "left"]: -6,
+                      width: 0,
+                      height: 0,
+                      borderTop: "6px solid transparent",
+                      borderBottom: "6px solid transparent",
+                      borderLeft: mine ? "6px solid transparent" : "6px solid var(--tiko-bg-card)",
+                      borderRight: mine ? "6px solid var(--tiko-purple)" : "6px solid transparent",
+                      filter: "drop-shadow(0 2px 2px rgba(0,0,0,0.25))",
+                    } as any}
+                  />
+                </div>
               </div>
             </div>
           );
@@ -277,6 +398,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           display: "flex",
           gap: 8,
           background: "var(--tiko-bg-gray)",
+          alignItems: "center",
         }}
       >
         <button type="button" onClick={() => fileInputRef.current?.click()}>
@@ -300,7 +422,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={onTyping}
           placeholder="Type a message…"
-          style={{ flex: 1 }}
+          style={{ flex: 1, minWidth: 0 }}
         />
 
         <button type="submit" disabled={!input.trim()}>
