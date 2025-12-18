@@ -1,6 +1,6 @@
 // src/pages/HomePage.tsx
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
@@ -22,6 +22,7 @@ import {
 import { useAuth } from "../AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { useI18n } from "../LanguageContext";
+import { playNotificationBeep, unlockAudio } from "../utils/notifySound";
 
 type MessageLike = Message & {
   createdAt?: string;
@@ -34,13 +35,11 @@ type MessageLike = Message & {
 
 function useIsMobile(breakpointPx: number = 900) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
-
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [breakpointPx]);
-
   return isMobile;
 }
 
@@ -99,9 +98,13 @@ const HomePage: React.FC = () => {
   const [friendIds, setFriendIds] = useState<Set<number>>(new Set());
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
 
+  // 🔔 sound
+  const [soundEnabled] = useState(true);
+  const [soundLocked, setSoundLocked] = useState(false);
+
   const typingTimeout = useRef<NodeJS.Timeout | null>(null);
 
-  // Read query params once
+  // Read query params once (focus mode)
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const convIdStr = params.get("convId");
@@ -119,12 +122,21 @@ const HomePage: React.FC = () => {
     }
   }, []);
 
+  // unlock audio on first gesture
+  useEffect(() => {
+    const onFirstGesture = async () => {
+      const ok = await unlockAudio();
+      setSoundLocked(!ok);
+    };
+    window.addEventListener("pointerdown", onFirstGesture, { once: true });
+    return () => window.removeEventListener("pointerdown", onFirstGesture);
+  }, []);
+
   const loadConversations = async () => {
     try {
       const list = await fetchConversations();
       setConversations(list);
 
-      // Desktop: select first if none AND not focus mode
       if (!isMobile && !focusMode && !selectedConversation && list.length > 0) {
         setSelectedConversation(list[0]);
         loadMessages(list[0].id);
@@ -168,32 +180,37 @@ const HomePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // If focusConvId is set, select that conversation when list arrives
+  // Select focus conversation when list arrives
   useEffect(() => {
     if (!focusConvId) return;
     const found = conversations.find((c) => c.id === focusConvId);
     if (found) setSelectedConversation(found);
   }, [conversations, focusConvId]);
 
-  // SOCKET (realtime)
+  // SOCKET
   const socket = useChatSocket(user ? user.id : null, {
-    // IMPORTANT: onMessage will receive message:new, message:update, message:delete
-    onMessage: ({ conversationId, message }) => {
-      // always refresh conversation list (for last message preview)
+    onMessage: async ({ conversationId, message }) => {
       loadConversations();
 
-      // update currently opened conversation messages
-      if (selectedConversation?.id === Number(conversationId)) {
+      const convId = Number(conversationId);
+      const fromOther = message?.senderId && user?.id ? message.senderId !== user.id : true;
+
+      if (
+        soundEnabled &&
+        fromOther &&
+        (document.visibilityState !== "visible" || selectedConversation?.id !== convId)
+      ) {
+        const ok = await playNotificationBeep();
+        setSoundLocked(!ok);
+      }
+
+      if (selectedConversation?.id === convId) {
         setMessages((prev) => upsertMessage(prev, message));
       }
     },
-
     onConversationNew: () => loadConversations(),
-
     onUserOnline: () => loadConversations(),
-
     onUserOffline: () => loadConversations(),
-
     onTyping: ({ conversationId, userId }) => {
       if (Number(conversationId) !== selectedConversation?.id) return;
 
@@ -204,7 +221,6 @@ const HomePage: React.FC = () => {
     },
   });
 
-  // Join conversation room + load messages when selection changes
   useEffect(() => {
     if (!selectedConversation) return;
 
@@ -215,13 +231,11 @@ const HomePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversation]);
 
-  // Send message normal
   const handleSend = (content: string) => {
     if (!selectedConversation) return;
     socket.sendMessage(selectedConversation.id, content, null);
   };
 
-  // Send message with replyToId (NEW)
   const handleSendWithReply = (content: string, replyToId: number | null) => {
     if (!selectedConversation) return;
     socket.sendMessage(selectedConversation.id, content, replyToId ?? null);
@@ -270,7 +284,6 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // Start chat with user (from search)
   const startChatWithUser = async (u: User) => {
     try {
       const conv = await createConversation(u.id);
@@ -311,13 +324,9 @@ const HomePage: React.FC = () => {
 
   if (!user) return <div>Not authenticated</div>;
 
-  // Focus list
   const conversationsForList =
-    focusMode && focusConvId
-      ? conversations.filter((c) => c.id === focusConvId)
-      : conversations;
+    focusMode && focusConvId ? conversations.filter((c) => c.id === focusConvId) : conversations;
 
-  // Mobile chats drawer (only if NOT focusMode)
   const MobileChatsDrawer =
     !focusMode && mobileChatsDrawerOpen ? (
       <div
@@ -461,18 +470,6 @@ const HomePage: React.FC = () => {
                   <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
                 </div>
 
-                {u.mood && (
-                  <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
-                    Mood: {u.mood}
-                  </div>
-                )}
-
-                {u.interests?.length ? (
-                  <div style={{ fontSize: 12, marginTop: 2 }}>
-                    Interests: {u.interests.join(", ")}
-                  </div>
-                ) : null}
-
                 <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
                   <button style={{ fontSize: 12 }} onClick={() => startChatWithUser(u)} type="button">
                     {t("homeStartChat")}
@@ -501,6 +498,12 @@ const HomePage: React.FC = () => {
           })}
         </div>
       )}
+
+      {soundEnabled && soundLocked && (
+        <div style={{ marginTop: 12, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          Sound is blocked by the browser. Tap anywhere once to enable notifications.
+        </div>
+      )}
     </div>
   );
 
@@ -511,31 +514,9 @@ const HomePage: React.FC = () => {
         selectedConversationId={selectedConversation?.id ?? null}
         onSelect={(conv) => setSelectedConversation(conv)}
       />
-
-      {/* exit focus */}
-      {focusMode && (
-        <div style={{ padding: 10 }}>
-          <button
-            type="button"
-            onClick={() => {
-              setFocusMode(false);
-              setFocusConvId(null);
-              const url = new URL(window.location.href);
-              url.searchParams.delete("convId");
-              url.searchParams.delete("focus");
-              window.history.replaceState({}, "", url.toString());
-              loadConversations();
-            }}
-            style={{ width: "100%" }}
-          >
-            Torna a tutte le chat
-          </button>
-        </div>
-      )}
     </div>
   );
 
-  // MOBILE
   if (isMobile) {
     return (
       <div style={{ height: "100vh", background: "var(--tiko-bg-dark)" }}>
@@ -550,31 +531,6 @@ const HomePage: React.FC = () => {
           </div>
         ) : (
           <div style={{ height: "100vh", position: "relative" }}>
-            {!focusMode && (
-              <button
-                type="button"
-                onClick={() => setMobileChatsDrawerOpen(true)}
-                style={{
-                  position: "fixed",
-                  top: "calc(env(safe-area-inset-top, 0px) + 10px)",
-                  right: "calc(env(safe-area-inset-right, 0px) + 10px)",
-                  zIndex: 11000,
-                  background: "var(--tiko-bg-card)",
-                  border: "1px solid #333",
-                  borderRadius: 12,
-                  padding: "10px 12px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                  cursor: "pointer",
-                  boxShadow: "var(--tiko-glow)",
-                  color: "#fff",
-                }}
-                title="Switch chat"
-              >
-                Chats
-              </button>
-            )}
-
             {MobileChatsDrawer}
 
             <ChatWindow
@@ -586,6 +542,7 @@ const HomePage: React.FC = () => {
               onSendWithReply={handleSendWithReply}
               onTyping={handleTyping}
               onDeleteConversation={handleDeleteConversation}
+              onOpenChats={focusMode ? undefined : () => setMobileChatsDrawerOpen(true)}
               onBack={() => {
                 setMobileTab("chats");
                 setMobileScreen("list");
@@ -597,7 +554,6 @@ const HomePage: React.FC = () => {
     );
   }
 
-  // DESKTOP
   return (
     <div className="tiko-layout" style={{ height: "100vh", overflow: "hidden" }}>
       <Sidebar />
@@ -640,26 +596,6 @@ const HomePage: React.FC = () => {
               selectedConversationId={selectedConversation?.id ?? null}
               onSelect={(conv) => setSelectedConversation(conv)}
             />
-
-            {focusMode && (
-              <div style={{ padding: 10 }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setFocusMode(false);
-                    setFocusConvId(null);
-                    const url = new URL(window.location.href);
-                    url.searchParams.delete("convId");
-                    url.searchParams.delete("focus");
-                    window.history.replaceState({}, "", url.toString());
-                    loadConversations();
-                  }}
-                  style={{ width: "100%" }}
-                >
-                  Torna a tutte le chat
-                </button>
-              </div>
-            )}
           </div>
         </div>
 
