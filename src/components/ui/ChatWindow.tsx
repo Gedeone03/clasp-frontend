@@ -33,7 +33,6 @@ function isImageUrl(content: string): boolean {
 function isAudioUrl(content: string): boolean {
   return /^(https?:\/\/|\/).+\.(mp3|ogg|wav|webm|m4a)$/i.test(content);
 }
-
 function formatTime(value?: any): string {
   if (!value) return "";
   try {
@@ -109,10 +108,12 @@ function AvatarBubble({ user, size = 34 }: { user: User | null; size?: number })
 }
 
 type MessageLike = Message & {
+  createdAt?: string;
   editedAt?: string | null;
   deletedAt?: string | null;
   replyToId?: number | null;
   replyTo?: any | null;
+  sender?: any | null;
 };
 
 interface ChatWindowProps {
@@ -123,9 +124,9 @@ interface ChatWindowProps {
   onSend: (content: string) => void;
   onTyping: () => void;
   onDeleteConversation?: () => void;
-  onBack?: () => void;
 
-  // ✅ opzionale: se HomePage lo passa, inviamo replyToId “vero”
+  onBack?: () => void;
+  onOpenChats?: () => void; // apre switch chat
   onSendWithReply?: (content: string, replyToId: number | null) => void;
 }
 
@@ -138,19 +139,18 @@ export default function ChatWindow({
   onTyping,
   onDeleteConversation,
   onBack,
+  onOpenChats,
   onSendWithReply,
 }: ChatWindowProps) {
   const isMobile = useIsMobile(900);
+  const STAGGER = isMobile ? 25 : 14;
 
   const [input, setInput] = useState("");
   const [uploadingImage, setUploadingImage] = useState(false);
   const [recording, setRecording] = useState(false);
   const [uploadingAudio, setUploadingAudio] = useState(false);
 
-  // UI state for actions
   const [activeActionMsgId, setActiveActionMsgId] = useState<number | null>(null);
-
-  // reply/edit modes
   const [replyTo, setReplyTo] = useState<MessageLike | null>(null);
   const [editingMsg, setEditingMsg] = useState<MessageLike | null>(null);
 
@@ -159,9 +159,6 @@ export default function ChatWindow({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
 
-  // sfalsamento dinamico
-  const STAGGER = isMobile ? 25 : 14;
-
   const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
 
   useEffect(() => {
@@ -169,7 +166,6 @@ export default function ChatWindow({
   }, [messages]);
 
   useEffect(() => {
-    // quando cambi conversazione, resetta modalità reply/edit
     setReplyTo(null);
     setEditingMsg(null);
     setActiveActionMsgId(null);
@@ -185,12 +181,37 @@ export default function ChatWindow({
       .map((p: any) => p.user)
       .find((u: any) => u && u.id !== currentUser.id) || null;
 
+  async function patchMessage(messageId: number, content: string) {
+    const token = localStorage.getItem("token");
+    const r = await fetch(`${baseUrl}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ content }),
+    });
+    if (!r.ok) throw new Error(`PATCH failed: ${r.status}`);
+    return await r.json();
+  }
+
+  async function deleteMessage(messageId: number) {
+    const token = localStorage.getItem("token");
+    const r = await fetch(`${baseUrl}/messages/${messageId}`, {
+      method: "DELETE",
+      headers: {
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+    });
+    if (!r.ok) throw new Error(`DELETE failed: ${r.status}`);
+    return await r.json();
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const text = input.trim();
     if (!text) return;
 
-    // EDIT mode
     if (editingMsg) {
       try {
         await patchMessage(editingMsg.id, text);
@@ -203,7 +224,6 @@ export default function ChatWindow({
       return;
     }
 
-    // REPLY mode (prefer onSendWithReply if provided)
     if (replyTo && onSendWithReply) {
       onSendWithReply(text, replyTo.id);
       setReplyTo(null);
@@ -211,7 +231,6 @@ export default function ChatWindow({
       return;
     }
 
-    // fallback: normal send
     onSend(text);
     setReplyTo(null);
     setInput("");
@@ -280,32 +299,6 @@ export default function ChatWindow({
     }
   };
 
-  async function patchMessage(messageId: number, content: string) {
-    const token = localStorage.getItem("token");
-    const r = await fetch(`${baseUrl}/messages/${messageId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ content }),
-    });
-    if (!r.ok) throw new Error(`PATCH failed: ${r.status}`);
-    return await r.json();
-  }
-
-  async function deleteMessage(messageId: number) {
-    const token = localStorage.getItem("token");
-    const r = await fetch(`${baseUrl}/messages/${messageId}`, {
-      method: "DELETE",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    if (!r.ok) throw new Error(`DELETE failed: ${r.status}`);
-    return await r.json();
-  }
-
   const renderQuoted = (msg: MessageLike) => {
     if (!msg.replyTo) return null;
     const rt = msg.replyTo;
@@ -328,20 +321,13 @@ export default function ChatWindow({
   };
 
   const renderContent = (m: MessageLike) => {
-    if (m.deletedAt) {
-      return <div style={{ fontStyle: "italic", opacity: 0.85 }}>Message deleted</div>;
-    }
+    if (m.deletedAt) return <div style={{ fontStyle: "italic", opacity: 0.85 }}>Message deleted</div>;
     if (isImageUrl(m.content)) {
       return (
         <img
           src={m.content}
           alt="img"
-          style={{
-            maxWidth: "min(320px, 70vw)",
-            width: "100%",
-            borderRadius: 12,
-            display: "block",
-          }}
+          style={{ maxWidth: "min(320px, 70vw)", width: "100%", borderRadius: 12, display: "block" }}
         />
       );
     }
@@ -388,19 +374,34 @@ export default function ChatWindow({
             <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
               {other?.displayName || "Conversation"}
             </strong>
-          </div>
 
-          <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 2 }}>
-            {other?.interests?.length ? `Interests: ${other.interests.join(", ")}` : ""}
+            {/* ✅ Chats button moved “towards center”: next to name */}
+            {onOpenChats && (
+              <button
+                type="button"
+                onClick={onOpenChats}
+                style={{
+                  marginLeft: 8,
+                  border: "1px solid #444",
+                  background: "transparent",
+                  borderRadius: 12,
+                  padding: "6px 10px",
+                  cursor: "pointer",
+                  whiteSpace: "nowrap",
+                }}
+                title="Switch chat"
+              >
+                Chats
+              </button>
+            )}
           </div>
 
           {typingUserId && typingUserId !== currentUser.id && (
-            <div style={{ fontSize: 12, color: "var(--tiko-blue)", marginTop: 4 }}>
-              Typing…
-            </div>
+            <div style={{ fontSize: 12, color: "var(--tiko-blue)", marginTop: 4 }}>Typing…</div>
           )}
         </div>
 
+        {/* RIGHT ACTIONS */}
         {onDeleteConversation && (
           <button
             onClick={onDeleteConversation}
@@ -465,7 +466,6 @@ export default function ChatWindow({
                 <AvatarBubble user={senderUser} size={34} />
 
                 <div style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
-                  {/* Bubble */}
                   <div
                     onClick={() => setActiveActionMsgId((prev) => (prev === m.id ? null : m.id))}
                     style={{
@@ -490,19 +490,14 @@ export default function ChatWindow({
                       </div>
                     )}
 
-                    {/* Quoted reply */}
                     {renderQuoted(m)}
-
-                    {/* Body */}
                     {renderContent(m)}
 
-                    {/* edited badge */}
                     {m.editedAt && !m.deletedAt && (
                       <div style={{ marginTop: 6, fontSize: 11, opacity: 0.85 }}>(edited)</div>
                     )}
                   </div>
 
-                  {/* Actions mini menu */}
                   {showActions && (
                     <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
                       <button
@@ -554,7 +549,6 @@ export default function ChatWindow({
                     </div>
                   )}
 
-                  {/* Meta */}
                   {(timeStr || ticks) && (
                     <div
                       style={{
@@ -577,7 +571,6 @@ export default function ChatWindow({
         })}
       </div>
 
-      {/* Composer bar: Reply/Edit preview */}
       {(replyTo || editingMsg) && (
         <div
           style={{
@@ -598,11 +591,7 @@ export default function ChatWindow({
                 {(replyTo.deletedAt ? "Message deleted" : replyTo.content || "").slice(0, 80)}
               </>
             )}
-            {editingMsg && (
-              <>
-                <strong>Editing message</strong>
-              </>
-            )}
+            {editingMsg && <strong>Editing message</strong>}
           </div>
 
           <button
