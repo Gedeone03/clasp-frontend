@@ -158,13 +158,8 @@ const HomePage: React.FC = () => {
   const loadRelationships = async () => {
     try {
       const [friendsList, sentReqs] = await Promise.all([fetchFriends(), fetchFriendRequestsSent()]);
-
       setFriendIds(new Set(friendsList.map((f) => f.id)));
-
-      const receiverIds = sentReqs
-        .map((r) => r.receiver?.id)
-        .filter((id): id is number => typeof id === "number");
-
+      const receiverIds = sentReqs.map((r) => r.receiver?.id).filter((id): id is number => typeof id === "number");
       setSentRequestUserIds(new Set(receiverIds));
     } catch (err) {
       console.error(err);
@@ -177,7 +172,6 @@ const HomePage: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // If focusConvId is set, select that conversation when list arrives
   useEffect(() => {
     if (!focusConvId) return;
     const found = conversations.find((c) => c.id === focusConvId);
@@ -189,18 +183,15 @@ const HomePage: React.FC = () => {
     onMessage: async ({ conversationId, message }) => {
       loadConversations();
 
-      const convId = Number(conversationId);
       const fromOther = message?.senderId && user?.id ? message.senderId !== user.id : true;
 
-      if (
-        soundEnabled &&
-        fromOther &&
-        (document.visibilityState !== "visible" || selectedConversation?.id !== convId)
-      ) {
+      // 🔔 CHANGE: suona sempre per messaggi in arrivo da altri utenti (più semplice)
+      if (soundEnabled && fromOther) {
         const ok = await playNotificationBeep();
         setSoundLocked(!ok);
       }
 
+      const convId = Number(conversationId);
       if (selectedConversation?.id === convId) {
         setMessages((prev) => upsertMessage(prev, message));
       }
@@ -253,7 +244,6 @@ const HomePage: React.FC = () => {
       await loadConversations();
       setSelectedConversation(null);
       setMessages([]);
-
       if (isMobile) setMobileScreen("list");
     } catch (err) {
       console.error(err);
@@ -269,7 +259,6 @@ const HomePage: React.FC = () => {
     setFriendRequestMsg(null);
     setSearchResults([]);
 
-    // allow searching even for 1 char; if empty, clear
     if (!term) {
       setSearchResults([]);
       setSearchError(null);
@@ -289,7 +278,7 @@ const HomePage: React.FC = () => {
     }
   };
 
-  // ✅ Debounce always (web + mobile)
+  // ✅ Debounce (web+mobile)
   useEffect(() => {
     if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
     searchDebounceRef.current = setTimeout(() => {
@@ -343,6 +332,12 @@ const HomePage: React.FC = () => {
     }
   };
 
+  const testSound = async () => {
+    const okUnlock = await unlockAudio();
+    const ok = await playNotificationBeep();
+    setSoundLocked(!(okUnlock && ok));
+  };
+
   if (!user) return <div>Not authenticated</div>;
 
   const conversationsForList =
@@ -350,59 +345,16 @@ const HomePage: React.FC = () => {
 
   const MobileChatsDrawer =
     !focusMode && mobileChatsDrawerOpen ? (
-      <div
-        style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.55)", display: "flex" }}
-        onClick={() => setMobileChatsDrawerOpen(false)}
-      >
-        <div
-          style={{
-            width: 320,
-            maxWidth: "90vw",
-            height: "100%",
-            background: "var(--tiko-bg-dark)",
-            borderRight: "1px solid #222",
-            boxShadow: "0 0 24px rgba(0,0,0,0.6)",
-            display: "flex",
-            flexDirection: "column",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div
-            style={{
-              padding: 12,
-              borderBottom: "1px solid #222",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              background: "var(--tiko-bg-gray)",
-            }}
-          >
+      <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.55)", display: "flex" }} onClick={() => setMobileChatsDrawerOpen(false)}>
+        <div style={{ width: 320, maxWidth: "90vw", height: "100%", background: "var(--tiko-bg-dark)", borderRight: "1px solid #222", boxShadow: "0 0 24px rgba(0,0,0,0.6)", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
+          <div style={{ padding: 12, borderBottom: "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--tiko-bg-gray)" }}>
             <strong>Chats</strong>
-            <button
-              type="button"
-              onClick={() => setMobileChatsDrawerOpen(false)}
-              style={{
-                border: "1px solid #444",
-                background: "transparent",
-                borderRadius: 10,
-                padding: "6px 10px",
-                cursor: "pointer",
-                color: "#fff",
-              }}
-            >
+            <button type="button" onClick={() => setMobileChatsDrawerOpen(false)} style={{ border: "1px solid #444", background: "transparent", borderRadius: 10, padding: "6px 10px", cursor: "pointer", color: "#fff" }}>
               Close
             </button>
           </div>
-
           <div style={{ flex: 1, minHeight: 0 }}>
-            <ConversationList
-              conversations={conversationsForList}
-              selectedConversationId={selectedConversation?.id ?? null}
-              onSelect={(conv) => {
-                setSelectedConversation(conv);
-                setMobileChatsDrawerOpen(false);
-              }}
-            />
+            <ConversationList conversations={conversationsForList} selectedConversationId={selectedConversation?.id ?? null} onSelect={(conv) => { setSelectedConversation(conv); setMobileChatsDrawerOpen(false); }} />
           </div>
         </div>
       </div>
@@ -410,18 +362,10 @@ const HomePage: React.FC = () => {
 
   const MobileTopTabs = (
     <div style={{ display: "flex", gap: 8, padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-gray)" }}>
-      <button
-        type="button"
-        onClick={() => setMobileTab("chats")}
-        style={{ flex: 1, background: mobileTab === "chats" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}
-      >
+      <button type="button" onClick={() => setMobileTab("chats")} style={{ flex: 1, background: mobileTab === "chats" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}>
         Chats
       </button>
-      <button
-        type="button"
-        onClick={() => setMobileTab("search")}
-        style={{ flex: 1, background: mobileTab === "search" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}
-      >
+      <button type="button" onClick={() => setMobileTab("search")} style={{ flex: 1, background: mobileTab === "search" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}>
         Search
       </button>
     </div>
@@ -434,20 +378,23 @@ const HomePage: React.FC = () => {
           placeholder={t("homeSearchPlaceholder")}
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") runSearch();
+          }}
         />
+
         <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-          <input
-            type="checkbox"
-            checked={searchVisibleOnly}
-            onChange={(e) => setSearchVisibleOnly(e.target.checked)}
-            style={{ marginRight: 6 }}
-          />
+          <input type="checkbox" checked={searchVisibleOnly} onChange={(e) => setSearchVisibleOnly(e.target.checked)} style={{ marginRight: 6 }} />
           {t("homeVisibleOnly")}
         </label>
 
-        {/* ✅ button ALWAYS triggers search even if submit fails */}
-        <button type="button" disabled={searchLoading} onClick={() => runSearch()}>
+        {/* ✅ submit button + onClick = always triggers */}
+        <button type="submit" disabled={searchLoading} onClick={() => runSearch()}>
           {t("homeSearchButton")}
+        </button>
+
+        <button type="button" onClick={testSound} style={{ background: "var(--tiko-bg-card)" }}>
+          Test sound
         </button>
       </form>
 
@@ -492,21 +439,13 @@ const HomePage: React.FC = () => {
         </div>
       )}
 
-      {soundEnabled && soundLocked && (
-        <div style={{ marginTop: 12, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-          Sound is blocked by the browser. Tap anywhere once to enable notifications.
-        </div>
-      )}
+      {soundLocked && <div style={{ marginTop: 12, fontSize: 12, color: "var(--tiko-text-dim)" }}>Sound blocked: click Test sound once.</div>}
     </div>
   );
 
   const ChatsPanel = (
     <div style={{ flex: 1, minHeight: 0 }}>
-      <ConversationList
-        conversations={conversationsForList}
-        selectedConversationId={selectedConversation?.id ?? null}
-        onSelect={(conv) => setSelectedConversation(conv)}
-      />
+      <ConversationList conversations={conversationsForList} selectedConversationId={selectedConversation?.id ?? null} onSelect={(conv) => setSelectedConversation(conv)} />
     </div>
   );
 
@@ -534,10 +473,7 @@ const HomePage: React.FC = () => {
               onTyping={handleTyping}
               onDeleteConversation={handleDeleteConversation}
               onOpenChats={focusMode ? undefined : () => setMobileChatsDrawerOpen(true)}
-              onBack={() => {
-                setMobileTab("chats");
-                setMobileScreen("list");
-              }}
+              onBack={() => { setMobileTab("chats"); setMobileScreen("list"); }}
             />
           </div>
         )}
@@ -553,16 +489,27 @@ const HomePage: React.FC = () => {
         <div style={{ width: 340, borderRight: "1px solid #222", display: "flex", flexDirection: "column", background: "var(--tiko-bg-gray)", minWidth: 0, height: "100%" }}>
           <div style={{ padding: 12, borderBottom: "1px solid #222" }}>
             <form onSubmit={handleSearchSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <input placeholder={t("homeSearchPlaceholder")} value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+              <input
+                placeholder={t("homeSearchPlaceholder")}
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") runSearch();
+                }}
+              />
 
               <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
                 <input type="checkbox" checked={searchVisibleOnly} onChange={(e) => setSearchVisibleOnly(e.target.checked)} style={{ marginRight: 6 }} />
                 {t("homeVisibleOnly")}
               </label>
 
-              {/* ✅ button click forces search even if submit fails */}
-              <button type="button" disabled={searchLoading} onClick={() => runSearch()}>
+              {/* ✅ submit + click */}
+              <button type="submit" disabled={searchLoading} onClick={() => runSearch()}>
                 {t("homeSearchButton")}
+              </button>
+
+              <button type="button" onClick={testSound} style={{ background: "var(--tiko-bg-card)" }}>
+                Test sound
               </button>
             </form>
 
