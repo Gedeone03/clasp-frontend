@@ -1,5 +1,3 @@
-// src/pages/HomePage.tsx
-
 import React, { useEffect, useRef, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
@@ -11,7 +9,6 @@ import {
   User,
   fetchConversations,
   fetchMessages,
-  searchUsers,
   createConversation,
   deleteConversation,
   sendFriendRequest,
@@ -23,6 +20,7 @@ import { useAuth } from "../AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { useI18n } from "../LanguageContext";
 import { playNotificationBeep, unlockAudio } from "../utils/notifySound";
+import { API_BASE_URL } from "../config";
 
 type MessageLike = Message & {
   createdAt?: string;
@@ -33,7 +31,7 @@ type MessageLike = Message & {
   sender?: any | null;
 };
 
-function useIsMobile(breakpointPx: number = 900) {
+function useIsMobile(breakpointPx = 900) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
@@ -43,499 +41,221 @@ function useIsMobile(breakpointPx: number = 900) {
   return isMobile;
 }
 
-function toTimeMs(v: any): number {
-  if (!v) return 0;
-  try {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
-  } catch {
-    return 0;
-  }
-}
-
-function upsertMessage(list: MessageLike[], msg: MessageLike): MessageLike[] {
-  const idx = list.findIndex((m) => m.id === msg.id);
-  let next: MessageLike[];
-  if (idx >= 0) {
-    next = [...list];
-    next[idx] = { ...next[idx], ...msg };
-  } else {
-    next = [...list, msg];
-  }
-  next.sort((a, b) => toTimeMs((a as any).createdAt) - toTimeMs((b as any).createdAt));
-  return next;
-}
-
-const HomePage: React.FC = () => {
+export default function HomePage() {
   const { user } = useAuth();
   const { t } = useI18n();
-  const isMobile = useIsMobile(900);
+  const isMobile = useIsMobile();
 
+  /* ---------------- CHAT STATE ---------------- */
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<MessageLike[]>([]);
   const [typingUserId, setTypingUserId] = useState<number | null>(null);
 
-  // Mobile views
+  /* ---------------- MOBILE UI ---------------- */
   const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
   const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
   const [mobileChatsDrawerOpen, setMobileChatsDrawerOpen] = useState(false);
 
-  // Focus mode
-  const [focusMode, setFocusMode] = useState(false);
-  const [focusConvId, setFocusConvId] = useState<number | null>(null);
+  /* ---------------- SEARCH STATE ---------------- */
+  const [searchName, setSearchName] = useState("");
+  const [searchCity, setSearchCity] = useState("");
+  const [searchArea, setSearchArea] = useState("");
+  const [visibleOnly, setVisibleOnly] = useState(false);
 
-  // Search
-  const [searchTerm, setSearchTerm] = useState("");
-  const [searchVisibleOnly, setSearchVisibleOnly] = useState(false);
   const [searchResults, setSearchResults] = useState<User[]>([]);
-  const [searchError, setSearchError] = useState<string | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
-  const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
 
-  // Relationship cache
+  /* ---------------- FRIENDS ---------------- */
   const [friendIds, setFriendIds] = useState<Set<number>>(new Set());
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
+  const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
 
-  // 🔔 sound
-  const [soundEnabled] = useState(true);
+  /* ---------------- SOUND ---------------- */
   const [soundLocked, setSoundLocked] = useState(false);
+  const lastBeepRef = useRef(0);
 
-  const typingTimeout = useRef<NodeJS.Timeout | null>(null);
-  const searchDebounceRef = useRef<any>(null);
-
-  // Read query params once (focus mode)
+  /* ---------------- INIT ---------------- */
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const convIdStr = params.get("convId");
-    const focusStr = params.get("focus");
-
-    const convId = convIdStr ? Number(convIdStr) : null;
-    const focus = focusStr === "1";
-
-    if (convId && !Number.isNaN(convId)) {
-      setFocusConvId(convId);
-      setFocusMode(focus);
-    } else {
-      setFocusConvId(null);
-      setFocusMode(false);
-    }
+    unlockAudio().then((ok) => setSoundLocked(!ok));
   }, []);
-
-  // unlock audio on first gesture
-  useEffect(() => {
-    const onFirstGesture = async () => {
-      const ok = await unlockAudio();
-      setSoundLocked(!ok);
-    };
-    window.addEventListener("pointerdown", onFirstGesture, { once: true });
-    return () => window.removeEventListener("pointerdown", onFirstGesture);
-  }, []);
-
-  const loadConversations = async () => {
-    try {
-      const list = await fetchConversations();
-      setConversations(list);
-
-      if (!isMobile && !focusMode && !selectedConversation && list.length > 0) {
-        setSelectedConversation(list[0]);
-        loadMessages(list[0].id);
-      }
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const loadMessages = async (convId: number) => {
-    try {
-      const msgs = await fetchMessages(convId);
-      setMessages(msgs as any);
-    } catch (err) {
-      console.error(err);
-    }
-  };
-
-  const loadRelationships = async () => {
-    try {
-      const [friendsList, sentReqs] = await Promise.all([fetchFriends(), fetchFriendRequestsSent()]);
-      setFriendIds(new Set(friendsList.map((f) => f.id)));
-      const receiverIds = sentReqs.map((r) => r.receiver?.id).filter((id): id is number => typeof id === "number");
-      setSentRequestUserIds(new Set(receiverIds));
-    } catch (err) {
-      console.error(err);
-    }
-  };
 
   useEffect(() => {
     loadConversations();
     loadRelationships();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!focusConvId) return;
-    const found = conversations.find((c) => c.id === focusConvId);
-    if (found) setSelectedConversation(found);
-  }, [conversations, focusConvId]);
+  /* ---------------- LOADERS ---------------- */
+  async function loadConversations() {
+    const list = await fetchConversations();
+    setConversations(list);
+    if (!isMobile && !selectedConversation && list.length > 0) {
+      setSelectedConversation(list[0]);
+      loadMessages(list[0].id);
+    }
+  }
 
-  // SOCKET (realtime)
-  const socket = useChatSocket(user ? user.id : null, {
+  async function loadMessages(convId: number) {
+    const msgs = await fetchMessages(convId);
+    setMessages(msgs as any);
+  }
+
+  async function loadRelationships() {
+    const [friends, sent] = await Promise.all([
+      fetchFriends(),
+      fetchFriendRequestsSent(),
+    ]);
+    setFriendIds(new Set(friends.map((f) => f.id)));
+    setSentRequestUserIds(new Set(sent.map((r) => r.receiver?.id).filter(Boolean)));
+  }
+
+  /* ---------------- SOCKET ---------------- */
+  const socket = useChatSocket(user?.id ?? null, {
     onMessage: async ({ conversationId, message }) => {
       loadConversations();
 
-      const fromOther = message?.senderId && user?.id ? message.senderId !== user.id : true;
-
-      // 🔔 CHANGE: suona sempre per messaggi in arrivo da altri utenti (più semplice)
-      if (soundEnabled && fromOther) {
-        const ok = await playNotificationBeep();
-        setSoundLocked(!ok);
+      if (message.senderId !== user?.id) {
+        const now = Date.now();
+        if (now - lastBeepRef.current > 1000) {
+          lastBeepRef.current = now;
+          const ok = await playNotificationBeep();
+          setSoundLocked(!ok);
+        }
       }
 
-      const convId = Number(conversationId);
-      if (selectedConversation?.id === convId) {
-        setMessages((prev) => upsertMessage(prev, message));
+      if (selectedConversation?.id === Number(conversationId)) {
+        setMessages((prev) => [...prev, message]);
       }
     },
-    onConversationNew: () => loadConversations(),
-    onUserOnline: () => loadConversations(),
-    onUserOffline: () => loadConversations(),
     onTyping: ({ conversationId, userId }) => {
-      if (Number(conversationId) !== selectedConversation?.id) return;
-
-      setTypingUserId(userId);
-      if (typingTimeout.current) clearTimeout(typingTimeout.current);
-      typingTimeout.current = setTimeout(() => setTypingUserId(null), 1500);
+      if (Number(conversationId) === selectedConversation?.id) {
+        setTypingUserId(userId);
+        setTimeout(() => setTypingUserId(null), 1500);
+      }
     },
   });
 
   useEffect(() => {
     if (!selectedConversation) return;
-
     socket.joinConversation(selectedConversation.id);
     loadMessages(selectedConversation.id);
-
     if (isMobile) setMobileScreen("chat");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversation]);
 
-  const handleSend = (content: string) => {
-    if (!selectedConversation) return;
-    socket.sendMessage(selectedConversation.id, content, null);
-  };
-
-  const handleSendWithReply = (content: string, replyToId: number | null) => {
-    if (!selectedConversation) return;
-    socket.sendMessage(selectedConversation.id, content, replyToId ?? null);
-  };
-
-  const handleTyping = () => {
-    if (!selectedConversation) return;
-    socket.sendTyping(selectedConversation.id);
-  };
-
-  const handleDeleteConversation = async () => {
-    if (!selectedConversation) return;
-
-    const ok = window.confirm(t("homeDeleteChatConfirm"));
-    if (!ok) return;
-
-    try {
-      await deleteConversation(selectedConversation.id);
-      await loadConversations();
-      setSelectedConversation(null);
-      setMessages([]);
-      if (isMobile) setMobileScreen("list");
-    } catch (err) {
-      console.error(err);
-      alert(t("homeDeleteChatError"));
-    }
-  };
-
-  // ✅ Robust search runner
-  const runSearch = async () => {
-    const term = searchTerm.trim();
-
+  /* ---------------- SEARCH ---------------- */
+  async function runSearch() {
+    setSearchLoading(true);
     setSearchError(null);
-    setFriendRequestMsg(null);
     setSearchResults([]);
 
-    if (!term) {
-      setSearchResults([]);
-      setSearchError(null);
-      return;
-    }
-
     try {
-      setSearchLoading(true);
-      const res = await searchUsers(term, searchVisibleOnly);
-      setSearchResults(res.filter((u) => u.id !== user?.id));
-      if (res.length === 0) setSearchError(t("homeNoUserFound"));
-    } catch (err) {
-      console.error(err);
-      setSearchError(t("homeSearchError"));
+      const params = new URLSearchParams();
+      if (searchName) params.append("q", searchName);
+      if (searchCity) params.append("city", searchCity);
+      if (searchArea) params.append("area", searchArea);
+      if (visibleOnly) params.append("visibleOnly", "true");
+
+      const res = await fetch(`${API_BASE_URL}/users?${params.toString()}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
+
+      if (!res.ok) throw new Error("Search failed");
+
+      const users = await res.json();
+      setSearchResults(users.filter((u: User) => u.id !== user?.id));
+      if (users.length === 0) setSearchError("No users found");
+    } catch {
+      setSearchError("Search error");
     } finally {
       setSearchLoading(false);
     }
-  };
+  }
 
-  // ✅ Debounce (web+mobile)
-  useEffect(() => {
-    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
-    searchDebounceRef.current = setTimeout(() => {
-      runSearch();
-    }, 350);
-
-    return () => clearTimeout(searchDebounceRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchTerm, searchVisibleOnly]);
-
-  const handleSearchSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    runSearch();
-  };
-
-  const startChatWithUser = async (u: User) => {
-    try {
-      const conv = await createConversation(u.id);
-      await loadConversations();
-      setSelectedConversation(conv);
-
-      if (isMobile) {
-        setMobileTab("chats");
-        setMobileScreen("chat");
-      }
-    } catch (err) {
-      console.error(err);
-      alert("Error creating chat");
-    }
-  };
-
-  const handleSendFriendRequest = async (u: User) => {
-    try {
-      setFriendRequestMsg(null);
-
-      if (friendIds.has(u.id)) {
-        setFriendRequestMsg(`${t("homeAlreadyFriend")} @${u.username}`);
-        return;
-      }
-      if (sentRequestUserIds.has(u.id)) {
-        setFriendRequestMsg(`${t("homeAlreadyRequested")} @${u.username}`);
-        return;
-      }
-
-      await sendFriendRequest(u.id);
-      setSentRequestUserIds((prev) => new Set([...prev, u.id]));
-      setFriendRequestMsg(`${t("homeFriendRequestSentTo")} @${u.username}`);
-    } catch (err: any) {
-      console.error(err);
-      setFriendRequestMsg(err?.response?.data?.error || t("homeSearchError"));
-    }
-  };
-
-  const testSound = async () => {
-    const okUnlock = await unlockAudio();
-    const ok = await playNotificationBeep();
-    setSoundLocked(!(okUnlock && ok));
-  };
-
-  if (!user) return <div>Not authenticated</div>;
-
-  const conversationsForList =
-    focusMode && focusConvId ? conversations.filter((c) => c.id === focusConvId) : conversations;
-
-  const MobileChatsDrawer =
-    !focusMode && mobileChatsDrawerOpen ? (
-      <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.55)", display: "flex" }} onClick={() => setMobileChatsDrawerOpen(false)}>
-        <div style={{ width: 320, maxWidth: "90vw", height: "100%", background: "var(--tiko-bg-dark)", borderRight: "1px solid #222", boxShadow: "0 0 24px rgba(0,0,0,0.6)", display: "flex", flexDirection: "column" }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ padding: 12, borderBottom: "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--tiko-bg-gray)" }}>
-            <strong>Chats</strong>
-            <button type="button" onClick={() => setMobileChatsDrawerOpen(false)} style={{ border: "1px solid #444", background: "transparent", borderRadius: 10, padding: "6px 10px", cursor: "pointer", color: "#fff" }}>
-              Close
-            </button>
-          </div>
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <ConversationList conversations={conversationsForList} selectedConversationId={selectedConversation?.id ?? null} onSelect={(conv) => { setSelectedConversation(conv); setMobileChatsDrawerOpen(false); }} />
-          </div>
-        </div>
-      </div>
-    ) : null;
-
-  const MobileTopTabs = (
-    <div style={{ display: "flex", gap: 8, padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-gray)" }}>
-      <button type="button" onClick={() => setMobileTab("chats")} style={{ flex: 1, background: mobileTab === "chats" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}>
-        Chats
-      </button>
-      <button type="button" onClick={() => setMobileTab("search")} style={{ flex: 1, background: mobileTab === "search" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}>
-        Search
-      </button>
-    </div>
-  );
+  /* ---------------- UI BLOCKS ---------------- */
 
   const SearchPanel = (
     <div style={{ padding: 12 }}>
-      <form onSubmit={handleSearchSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        <input
-          placeholder={t("homeSearchPlaceholder")}
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") runSearch();
-          }}
-        />
+      <input placeholder="Name" value={searchName} onChange={(e) => setSearchName(e.target.value)} />
+      <input placeholder="City" value={searchCity} onChange={(e) => setSearchCity(e.target.value)} />
+      <input placeholder="Area" value={searchArea} onChange={(e) => setSearchArea(e.target.value)} />
 
-        <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-          <input type="checkbox" checked={searchVisibleOnly} onChange={(e) => setSearchVisibleOnly(e.target.checked)} style={{ marginRight: 6 }} />
-          {t("homeVisibleOnly")}
-        </label>
+      <label>
+        <input type="checkbox" checked={visibleOnly} onChange={(e) => setVisibleOnly(e.target.checked)} />
+        Visible to everyone
+      </label>
 
-        {/* ✅ submit button + onClick = always triggers */}
-        <button type="submit" disabled={searchLoading} onClick={() => runSearch()}>
-          {t("homeSearchButton")}
-        </button>
+      <button onClick={runSearch} disabled={searchLoading}>
+        {searchLoading ? "Searching..." : "Search"}
+      </button>
 
-        <button type="button" onClick={testSound} style={{ background: "var(--tiko-bg-card)" }}>
-          Test sound
-        </button>
-      </form>
+      {searchError && <div style={{ color: "red" }}>{searchError}</div>}
 
-      {searchError && <div style={{ color: "red", marginTop: 8 }}>{searchError}</div>}
-      {friendRequestMsg && <div style={{ color: "var(--tiko-text-dim)", marginTop: 8 }}>{friendRequestMsg}</div>}
-
-      {searchResults.length > 0 && (
-        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 8 }}>
-          {searchResults.map((u) => {
-            const isFriend = friendIds.has(u.id);
-            const isPendingSent = sentRequestUserIds.has(u.id);
-
-            return (
-              <div key={u.id} style={{ padding: 10, borderRadius: 12, background: "var(--tiko-bg-card)", border: "1px solid #2a2a2a" }}>
-                <div style={{ fontSize: 13 }}>
-                  <strong>{u.displayName}</strong>{" "}
-                  <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
-                </div>
-
-                <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                  <button style={{ fontSize: 12 }} onClick={() => startChatWithUser(u)} type="button">
-                    {t("homeStartChat")}
-                  </button>
-
-                  <button
-                    style={{
-                      fontSize: 12,
-                      background: isFriend || isPendingSent ? "#444" : "var(--tiko-mint)",
-                      color: isFriend || isPendingSent ? "#bbb" : "#000",
-                      cursor: isFriend || isPendingSent ? "not-allowed" : "pointer",
-                    }}
-                    disabled={isFriend || isPendingSent}
-                    onClick={() => handleSendFriendRequest(u)}
-                    type="button"
-                  >
-                    {isFriend ? t("homeAlreadyFriendsButton") : isPendingSent ? t("homeRequestSentButton") : t("homeSendFriendRequest")}
-                  </button>
-                </div>
-              </div>
-            );
-          })}
+      {searchResults.map((u) => (
+        <div key={u.id}>
+          <strong>{u.displayName}</strong> @{u.username}
         </div>
-      )}
-
-      {soundLocked && <div style={{ marginTop: 12, fontSize: 12, color: "var(--tiko-text-dim)" }}>Sound blocked: click Test sound once.</div>}
+      ))}
     </div>
   );
 
   const ChatsPanel = (
-    <div style={{ flex: 1, minHeight: 0 }}>
-      <ConversationList conversations={conversationsForList} selectedConversationId={selectedConversation?.id ?? null} onSelect={(conv) => setSelectedConversation(conv)} />
-    </div>
+    <ConversationList
+      conversations={conversations}
+      selectedConversationId={selectedConversation?.id ?? null}
+      onSelect={(c) => setSelectedConversation(c)}
+    />
   );
 
   if (isMobile) {
     return (
-      <div style={{ height: "100vh", background: "var(--tiko-bg-dark)" }}>
+      <>
         <Sidebar />
-
         {mobileScreen === "list" ? (
-          <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
-            {MobileTopTabs}
-            <div style={{ flex: 1, overflowY: "auto" }}>{mobileTab === "search" ? SearchPanel : ChatsPanel}</div>
-          </div>
+          <>
+            <button onClick={() => setMobileTab("chats")}>Chats</button>
+            <button onClick={() => setMobileTab("search")}>Search</button>
+            {mobileTab === "search" ? SearchPanel : ChatsPanel}
+          </>
         ) : (
-          <div style={{ height: "100vh", position: "relative" }}>
-            {MobileChatsDrawer}
-
-            <ChatWindow
-              conversation={selectedConversation}
-              messages={messages}
-              currentUser={user}
-              typingUserId={typingUserId}
-              onSend={handleSend}
-              onSendWithReply={handleSendWithReply}
-              onTyping={handleTyping}
-              onDeleteConversation={handleDeleteConversation}
-              onOpenChats={focusMode ? undefined : () => setMobileChatsDrawerOpen(true)}
-              onBack={() => { setMobileTab("chats"); setMobileScreen("list"); }}
-            />
-          </div>
+          <ChatWindow
+            conversation={selectedConversation}
+            messages={messages}
+            currentUser={user!}
+            typingUserId={typingUserId}
+            onSend={(c) => socket.sendMessage(selectedConversation!.id, c, null)}
+            onTyping={() => socket.sendTyping(selectedConversation!.id)}
+            onDeleteConversation={async () => {
+              await deleteConversation(selectedConversation!.id);
+              setSelectedConversation(null);
+              setMobileScreen("list");
+            }}
+            onOpenChats={() => setMobileChatsDrawerOpen(true)}
+            onBack={() => setMobileScreen("list")}
+          />
         )}
-      </div>
+      </>
     );
   }
 
   return (
-    <div className="tiko-layout" style={{ height: "100vh", overflow: "hidden" }}>
+    <div style={{ display: "flex", height: "100vh" }}>
       <Sidebar />
-
-      <div style={{ flex: 1, display: "flex", minWidth: 0, height: "100%" }}>
-        <div style={{ width: 340, borderRight: "1px solid #222", display: "flex", flexDirection: "column", background: "var(--tiko-bg-gray)", minWidth: 0, height: "100%" }}>
-          <div style={{ padding: 12, borderBottom: "1px solid #222" }}>
-            <form onSubmit={handleSearchSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              <input
-                placeholder={t("homeSearchPlaceholder")}
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") runSearch();
-                }}
-              />
-
-              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                <input type="checkbox" checked={searchVisibleOnly} onChange={(e) => setSearchVisibleOnly(e.target.checked)} style={{ marginRight: 6 }} />
-                {t("homeVisibleOnly")}
-              </label>
-
-              {/* ✅ submit + click */}
-              <button type="submit" disabled={searchLoading} onClick={() => runSearch()}>
-                {t("homeSearchButton")}
-              </button>
-
-              <button type="button" onClick={testSound} style={{ background: "var(--tiko-bg-card)" }}>
-                Test sound
-              </button>
-            </form>
-
-            {searchError && <div style={{ color: "red", marginTop: 8 }}>{searchError}</div>}
-          </div>
-
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <ConversationList conversations={conversationsForList} selectedConversationId={selectedConversation?.id ?? null} onSelect={(conv) => setSelectedConversation(conv)} />
-          </div>
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0, height: "100%" }}>
-          <ChatWindow
-            conversation={selectedConversation}
-            messages={messages}
-            currentUser={user}
-            typingUserId={typingUserId}
-            onSend={handleSend}
-            onSendWithReply={handleSendWithReply}
-            onTyping={handleTyping}
-            onDeleteConversation={handleDeleteConversation}
-          />
-        </div>
+      <div style={{ width: 320 }}>{SearchPanel}</div>
+      <div style={{ flex: 1 }}>
+        <ChatWindow
+          conversation={selectedConversation}
+          messages={messages}
+          currentUser={user!}
+          typingUserId={typingUserId}
+          onSend={(c) => socket.sendMessage(selectedConversation!.id, c, null)}
+          onTyping={() => socket.sendTyping(selectedConversation!.id)}
+          onDeleteConversation={async () => {
+            await deleteConversation(selectedConversation!.id);
+            setSelectedConversation(null);
+          }}
+        />
       </div>
     </div>
   );
-};
-
-export default HomePage;
+}
