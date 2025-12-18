@@ -313,42 +313,39 @@ export default function ChatWindow({
 
   const renderContent = (m: MessageLike) => {
     if (m.deletedAt) return <div style={{ fontStyle: "italic", opacity: 0.85 }}>Message deleted</div>;
-    if (isImageUrl(m.content)) {
-      return <img src={m.content} alt="img" style={{ maxWidth: "min(320px, 70vw)", width: "100%", borderRadius: 12, display: "block" }} />;
-    }
-    if (isAudioUrl(m.content)) {
-      return <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />;
-    }
+    if (isImageUrl(m.content)) return <img src={m.content} alt="img" style={{ maxWidth: "min(320px, 70vw)", width: "100%", borderRadius: 12, display: "block" }} />;
+    if (isAudioUrl(m.content)) return <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />;
     return <div style={{ lineHeight: 1.35, wordBreak: "break-word" }}>{m.content}</div>;
   };
 
-  const btnSmall = (extra?: React.CSSProperties): React.CSSProperties => ({
+  const headerBtn: React.CSSProperties = {
     border: "1px solid #444",
     background: "transparent",
     borderRadius: 12,
     padding: isMobile ? "6px 8px" : "6px 10px",
     cursor: "pointer",
     whiteSpace: "nowrap",
-    ...extra,
-  });
+    flex: "0 0 auto",
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* HEADER */}
+      {/* HEADER: grid = no overlap */}
       <div
         style={{
-          padding: 14,
+          padding: 12,
           borderBottom: "1px solid #222",
           background: "var(--tiko-bg-gray)",
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns: "1fr auto",
           alignItems: "center",
           gap: 10,
         }}
       >
-        {/* LEFT */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+        {/* Left side: title + Chats (accanto al nome) */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           {onBack && (
-            <button type="button" onClick={onBack} style={btnSmall({ fontWeight: 900 })} aria-label="Back">
+            <button type="button" onClick={onBack} style={{ ...headerBtn, fontWeight: 900 }} aria-label="Back">
               ←
             </button>
           )}
@@ -367,27 +364,25 @@ export default function ChatWindow({
             {other?.displayName || "Conversation"}
           </strong>
 
-          {/* ✅ Chats button here will NEVER overlap delete because title shrinks */}
           {onOpenChats && (
-            <button type="button" onClick={onOpenChats} style={btnSmall()} title="Switch chat">
+            <button type="button" onClick={onOpenChats} style={headerBtn} title="Switch chat">
               Chats
             </button>
           )}
         </div>
 
-        {/* RIGHT */}
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
-          {onDeleteConversation && (
-            <button type="button" onClick={onDeleteConversation} style={btnSmall({ borderRadius: 16 })} title="Delete chat">
-              Delete
-            </button>
-          )}
-        </div>
+        {/* Right side: Delete only */}
+        {onDeleteConversation ? (
+          <button type="button" onClick={onDeleteConversation} style={headerBtn} title="Delete chat">
+            Delete
+          </button>
+        ) : (
+          <div />
+        )}
       </div>
 
-      {/* TYPING */}
       {typingUserId && typingUserId !== currentUser.id && (
-        <div style={{ padding: "6px 14px", fontSize: 12, color: "var(--tiko-blue)", background: "var(--tiko-bg-gray)" }}>
+        <div style={{ padding: "6px 12px", fontSize: 12, color: "var(--tiko-blue)", background: "var(--tiko-bg-gray)" }}>
           Typing…
         </div>
       )}
@@ -401,10 +396,7 @@ export default function ChatWindow({
           const timeStr = formatTime((m as any).createdAt);
           const ticks = mine ? "\u2713\u2713" : "";
 
-          const rowPaddingStyle = mine
-            ? { marginLeft: `${STAGGER}%`, marginRight: 6 }
-            : { marginRight: `${STAGGER}%`, marginLeft: 6 };
-
+          const rowPaddingStyle = mine ? { marginLeft: `${STAGGER}%`, marginRight: 6 } : { marginRight: `${STAGGER}%`, marginLeft: 6 };
           const showActions = activeActionMsgId === m.id;
 
           return (
@@ -427,7 +419,6 @@ export default function ChatWindow({
                       cursor: "pointer",
                       position: "relative",
                     }}
-                    title="Tap for actions"
                   >
                     {!mine && <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginBottom: 4 }}>{senderUser?.displayName || "User"}</div>}
                     {renderQuoted(m)}
@@ -437,33 +428,15 @@ export default function ChatWindow({
 
                   {showActions && (
                     <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReplyTo(m);
-                          setEditingMsg(null);
-                          setActiveActionMsgId(null);
-                        }}
-                        style={{ fontSize: 12 }}
-                      >
+                      <button type="button" onClick={() => { setReplyTo(m); setEditingMsg(null); setActiveActionMsgId(null); }} style={{ fontSize: 12 }}>
                         Reply
                       </button>
 
                       {mine && !m.deletedAt && (
                         <>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setEditingMsg(m);
-                              setReplyTo(null);
-                              setInput(m.content || "");
-                              setActiveActionMsgId(null);
-                            }}
-                            style={{ fontSize: 12 }}
-                          >
+                          <button type="button" onClick={() => { setEditingMsg(m); setReplyTo(null); setInput(m.content || ""); setActiveActionMsgId(null); }} style={{ fontSize: 12 }}>
                             Edit
                           </button>
-
                           <button
                             type="button"
                             onClick={async () => {
@@ -511,15 +484,7 @@ export default function ChatWindow({
             )}
             {editingMsg && <strong>Editing message</strong>}
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setReplyTo(null);
-              setEditingMsg(null);
-              setInput("");
-            }}
-            style={{ fontSize: 12 }}
-          >
+          <button type="button" onClick={() => { setReplyTo(null); setEditingMsg(null); setInput(""); }} style={{ fontSize: 12 }}>
             X
           </button>
         </div>
@@ -527,27 +492,11 @@ export default function ChatWindow({
 
       {/* INPUT */}
       <form onSubmit={handleSubmit} style={{ borderTop: "1px solid #222", padding: 10, display: "flex", gap: 8, background: "var(--tiko-bg-gray)", alignItems: "center" }}>
-        <button type="button" onClick={() => fileInputRef.current?.click()}>
-          +
-        </button>
-
+        <button type="button" onClick={() => fileInputRef.current?.click()}>+</button>
         <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAttachImage} />
-
-        <button type="button" onClick={toggleRecording}>
-          {recording ? "Stop" : "Audio"}
-        </button>
-
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onTyping}
-          placeholder={editingMsg ? "Edit message…" : replyTo ? "Reply…" : "Type a message…"}
-          style={{ flex: 1, minWidth: 0 }}
-        />
-
-        <button type="submit" disabled={!input.trim()}>
-          {editingMsg ? "Save" : "Send"}
-        </button>
+        <button type="button" onClick={toggleRecording}>{recording ? "Stop" : "Audio"}</button>
+        <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onTyping} placeholder={editingMsg ? "Edit message…" : replyTo ? "Reply…" : "Type a message…"} style={{ flex: 1, minWidth: 0 }} />
+        <button type="submit" disabled={!input.trim()}>{editingMsg ? "Save" : "Send"}</button>
       </form>
 
       {(uploadingImage || uploadingAudio) && <div style={{ fontSize: 12, padding: 6 }}>Sending…</div>}
