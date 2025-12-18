@@ -22,6 +22,7 @@ function StatusDot({ state }: { state: string }) {
         background: colors[state] || "#9E9E9E",
         display: "inline-block",
         marginRight: 6,
+        flex: "0 0 auto",
       }}
     />
   );
@@ -126,7 +127,7 @@ interface ChatWindowProps {
   onDeleteConversation?: () => void;
 
   onBack?: () => void;
-  onOpenChats?: () => void; // apre switch chat
+  onOpenChats?: () => void;
   onSendWithReply?: (content: string, replyToId: number | null) => void;
 }
 
@@ -172,9 +173,7 @@ export default function ChatWindow({
     setInput("");
   }, [conversation?.id]);
 
-  if (!conversation) {
-    return <div style={{ height: "100%", padding: 24 }}>Select a conversation</div>;
-  }
+  if (!conversation) return <div style={{ height: "100%", padding: 24 }}>Select a conversation</div>;
 
   const other =
     conversation.participants
@@ -305,15 +304,7 @@ export default function ChatWindow({
     const rtText = rt.deletedAt ? "Message deleted" : (rt.content || "");
     const rtName = rt.sender?.displayName || "User";
     return (
-      <div
-        style={{
-          borderLeft: "3px solid rgba(255,255,255,0.25)",
-          paddingLeft: 8,
-          marginBottom: 6,
-          opacity: 0.9,
-          fontSize: 12,
-        }}
-      >
+      <div style={{ borderLeft: "3px solid rgba(255,255,255,0.25)", paddingLeft: 8, marginBottom: 6, opacity: 0.9, fontSize: 12 }}>
         <div style={{ fontWeight: 800, marginBottom: 2 }}>{rtName}</div>
         <div style={{ color: "rgba(255,255,255,0.85)" }}>{rtText.slice(0, 120)}</div>
       </div>
@@ -323,19 +314,23 @@ export default function ChatWindow({
   const renderContent = (m: MessageLike) => {
     if (m.deletedAt) return <div style={{ fontStyle: "italic", opacity: 0.85 }}>Message deleted</div>;
     if (isImageUrl(m.content)) {
-      return (
-        <img
-          src={m.content}
-          alt="img"
-          style={{ maxWidth: "min(320px, 70vw)", width: "100%", borderRadius: 12, display: "block" }}
-        />
-      );
+      return <img src={m.content} alt="img" style={{ maxWidth: "min(320px, 70vw)", width: "100%", borderRadius: 12, display: "block" }} />;
     }
     if (isAudioUrl(m.content)) {
       return <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />;
     }
     return <div style={{ lineHeight: 1.35, wordBreak: "break-word" }}>{m.content}</div>;
   };
+
+  const btnSmall = (extra?: React.CSSProperties): React.CSSProperties => ({
+    border: "1px solid #444",
+    background: "transparent",
+    borderRadius: 12,
+    padding: isMobile ? "6px 8px" : "6px 10px",
+    cursor: "pointer",
+    whiteSpace: "nowrap",
+    ...extra,
+  });
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
@@ -346,91 +341,59 @@ export default function ChatWindow({
           borderBottom: "1px solid #222",
           background: "var(--tiko-bg-gray)",
           display: "flex",
-          justifyContent: "space-between",
           alignItems: "center",
-          gap: 12,
+          gap: 10,
         }}
       >
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {onBack && (
-              <button
-                type="button"
-                onClick={onBack}
-                style={{
-                  border: "1px solid #444",
-                  background: "transparent",
-                  borderRadius: 10,
-                  padding: "6px 10px",
-                  cursor: "pointer",
-                  fontWeight: 800,
-                }}
-                aria-label="Back"
-              >
-                ←
-              </button>
-            )}
-            <StatusDot state={other?.state || "OFFLINE"} />
-            <strong style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {other?.displayName || "Conversation"}
-            </strong>
+        {/* LEFT */}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: 1 }}>
+          {onBack && (
+            <button type="button" onClick={onBack} style={btnSmall({ fontWeight: 900 })} aria-label="Back">
+              ←
+            </button>
+          )}
 
-            {/* ✅ Chats button moved “towards center”: next to name */}
-            {onOpenChats && (
-              <button
-                type="button"
-                onClick={onOpenChats}
-                style={{
-                  marginLeft: 8,
-                  border: "1px solid #444",
-                  background: "transparent",
-                  borderRadius: 12,
-                  padding: "6px 10px",
-                  cursor: "pointer",
-                  whiteSpace: "nowrap",
-                }}
-                title="Switch chat"
-              >
-                Chats
-              </button>
-            )}
-          </div>
+          <StatusDot state={other?.state || "OFFLINE"} />
 
-          {typingUserId && typingUserId !== currentUser.id && (
-            <div style={{ fontSize: 12, color: "var(--tiko-blue)", marginTop: 4 }}>Typing…</div>
+          <strong
+            style={{
+              minWidth: 0,
+              flex: 1,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {other?.displayName || "Conversation"}
+          </strong>
+
+          {/* ✅ Chats button here will NEVER overlap delete because title shrinks */}
+          {onOpenChats && (
+            <button type="button" onClick={onOpenChats} style={btnSmall()} title="Switch chat">
+              Chats
+            </button>
           )}
         </div>
 
-        {/* RIGHT ACTIONS */}
-        {onDeleteConversation && (
-          <button
-            onClick={onDeleteConversation}
-            style={{
-              border: "1px solid #444",
-              background: "transparent",
-              borderRadius: 20,
-              padding: "6px 12px",
-              cursor: "pointer",
-              whiteSpace: "nowrap",
-            }}
-            title="Delete chat"
-          >
-            Delete
-          </button>
-        )}
+        {/* RIGHT */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "0 0 auto" }}>
+          {onDeleteConversation && (
+            <button type="button" onClick={onDeleteConversation} style={btnSmall({ borderRadius: 16 })} title="Delete chat">
+              Delete
+            </button>
+          )}
+        </div>
       </div>
 
+      {/* TYPING */}
+      {typingUserId && typingUserId !== currentUser.id && (
+        <div style={{ padding: "6px 14px", fontSize: 12, color: "var(--tiko-blue)", background: "var(--tiko-bg-gray)" }}>
+          Typing…
+        </div>
+      )}
+
       {/* MESSAGES */}
-      <div
-        ref={scrollRef}
-        style={{
-          flex: 1,
-          padding: 16,
-          overflowY: "auto",
-          background: "var(--tiko-bg-dark)",
-          minHeight: 0,
-        }}
-      >
+      <div ref={scrollRef} style={{ flex: 1, padding: 16, overflowY: "auto", background: "var(--tiko-bg-dark)", minHeight: 0 }}>
         {messages.map((m) => {
           const mine = m.senderId === currentUser.id;
           const senderUser: User | null = mine ? currentUser : ((m as any).sender as any) || other || null;
@@ -445,24 +408,8 @@ export default function ChatWindow({
           const showActions = activeActionMsgId === m.id;
 
           return (
-            <div
-              key={m.id}
-              style={{
-                display: "flex",
-                justifyContent: mine ? "flex-end" : "flex-start",
-                marginBottom: 10,
-                ...rowPaddingStyle,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  flexDirection: mine ? "row-reverse" : "row",
-                  alignItems: "flex-end",
-                  gap: 10,
-                  maxWidth: "100%",
-                }}
-              >
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 10, ...rowPaddingStyle }}>
+              <div style={{ display: "flex", flexDirection: mine ? "row-reverse" : "row", alignItems: "flex-end", gap: 10, maxWidth: "100%" }}>
                 <AvatarBubble user={senderUser} size={34} />
 
                 <div style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
@@ -476,26 +423,16 @@ export default function ChatWindow({
                       padding: 10,
                       borderRadius: 16,
                       border: mine ? "1px solid rgba(255,255,255,0.10)" : "1px solid #2a2a2a",
-                      boxShadow: mine
-                        ? "0 10px 24px rgba(122,41,255,0.28)"
-                        : "0 10px 24px rgba(0,0,0,0.28)",
+                      boxShadow: mine ? "0 10px 24px rgba(122,41,255,0.28)" : "0 10px 24px rgba(0,0,0,0.28)",
                       cursor: "pointer",
                       position: "relative",
                     }}
                     title="Tap for actions"
                   >
-                    {!mine && (
-                      <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginBottom: 4 }}>
-                        {senderUser?.displayName || "User"}
-                      </div>
-                    )}
-
+                    {!mine && <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginBottom: 4 }}>{senderUser?.displayName || "User"}</div>}
                     {renderQuoted(m)}
                     {renderContent(m)}
-
-                    {m.editedAt && !m.deletedAt && (
-                      <div style={{ marginTop: 6, fontSize: 11, opacity: 0.85 }}>(edited)</div>
-                    )}
+                    {m.editedAt && !m.deletedAt && <div style={{ marginTop: 6, fontSize: 11, opacity: 0.85 }}>(edited)</div>}
                   </div>
 
                   {showActions && (
@@ -550,16 +487,7 @@ export default function ChatWindow({
                   )}
 
                   {(timeStr || ticks) && (
-                    <div
-                      style={{
-                        marginTop: 4,
-                        fontSize: 11,
-                        color: "var(--tiko-text-dim)",
-                        display: "flex",
-                        gap: 8,
-                        alignItems: "center",
-                      }}
-                    >
+                    <div style={{ marginTop: 4, fontSize: 11, color: "var(--tiko-text-dim)", display: "flex", gap: 8, alignItems: "center" }}>
                       {timeStr && <span>{timeStr}</span>}
                       {ticks && <span style={{ letterSpacing: 1 }}>{ticks}</span>}
                     </div>
@@ -572,17 +500,7 @@ export default function ChatWindow({
       </div>
 
       {(replyTo || editingMsg) && (
-        <div
-          style={{
-            padding: 10,
-            borderTop: "1px solid #222",
-            background: "var(--tiko-bg-gray)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 12,
-          }}
-        >
+        <div style={{ padding: 10, borderTop: "1px solid #222", background: "var(--tiko-bg-gray)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
           <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
             {replyTo && (
               <>
@@ -593,7 +511,6 @@ export default function ChatWindow({
             )}
             {editingMsg && <strong>Editing message</strong>}
           </div>
-
           <button
             type="button"
             onClick={() => {
@@ -609,28 +526,12 @@ export default function ChatWindow({
       )}
 
       {/* INPUT */}
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          borderTop: "1px solid #222",
-          padding: 10,
-          display: "flex",
-          gap: 8,
-          background: "var(--tiko-bg-gray)",
-          alignItems: "center",
-        }}
-      >
+      <form onSubmit={handleSubmit} style={{ borderTop: "1px solid #222", padding: 10, display: "flex", gap: 8, background: "var(--tiko-bg-gray)", alignItems: "center" }}>
         <button type="button" onClick={() => fileInputRef.current?.click()}>
           +
         </button>
 
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept="image/*"
-          style={{ display: "none" }}
-          onChange={handleAttachImage}
-        />
+        <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAttachImage} />
 
         <button type="button" onClick={toggleRecording}>
           {recording ? "Stop" : "Audio"}
