@@ -30,6 +30,21 @@ type MessageLike = Message & {
   sender?: any | null;
 };
 
+function getAuthToken(): string {
+  const raw =
+    (localStorage.getItem("token") ||
+      localStorage.getItem("authToken") ||
+      localStorage.getItem("accessToken") ||
+      "") + "";
+
+  let t = raw.trim();
+  // rimuovi eventuali virgolette
+  t = t.replace(/^"(.*)"$/, "$1");
+  // rimuovi eventuale prefisso Bearer salvato dentro localStorage
+  if (t.toLowerCase().startsWith("bearer ")) t = t.slice(7).trim();
+  return t;
+}
+
 function useIsMobile(breakpointPx = 1100) {
   const compute = () => {
     const coarse =
@@ -38,7 +53,6 @@ function useIsMobile(breakpointPx = 1100) {
       window.matchMedia("(pointer: coarse)").matches;
     return coarse || window.innerWidth < breakpointPx;
   };
-
   const [isMobile, setIsMobile] = useState(compute);
 
   useEffect(() => {
@@ -74,9 +88,7 @@ function upsertMessage(list: MessageLike[], msg: MessageLike): MessageLike[] {
   return next;
 }
 
-/**
- * ✅ QUI: stati e mood “ufficiali” (come Profilo)
- */
+/** Stati/mood IDENTICI al profilo (come richiesto) */
 const STATE_OPTIONS = [
   { value: "", label: "Qualsiasi stato" },
   { value: "DISPONIBILE", label: "Disponibile" },
@@ -98,31 +110,17 @@ const MOOD_OPTIONS = [
   { value: "SOLO", label: "Solo" },
 ] as const;
 
-const STATE_COLOR: Record<string, string> = {
-  DISPONIBILE: "#2ecc71",
-  OCCUPATO: "#ff3b30",
-  ASSENTE: "#f39c12",
-  OFFLINE: "#95a5a6",
-  INVISIBILE: "#9b59b6",
-  VISIBILE_A_TUTTI: "#3ABEFF",
-
-  // compatibilità
-  ONLINE: "#2ecc71",
-  AWAY: "#f39c12",
-};
-
-function stateColor(state?: string | null) {
-  if (!state) return "#666";
-  return STATE_COLOR[state] ?? "#666";
-}
-
-function resolveAvatar(url?: string | null) {
-  if (!url) return "";
-  const t = url.trim();
-  if (!t) return "";
-  if (t.startsWith("http://") || t.startsWith("https://")) return t;
-  if (t.startsWith("/")) return `${API_BASE_URL.replace(/\/+$/, "")}${t}`;
-  return t;
+function getConversationKey(conv: any): string {
+  // robusto: usa ciò che esiste
+  const last =
+    conv?.lastMessage?.id ??
+    conv?.lastMessageId ??
+    conv?.lastMessage?.createdAt ??
+    conv?.lastMessageAt ??
+    conv?.updatedAt ??
+    conv?.createdAt ??
+    "";
+  return last ? String(last) : "";
 }
 
 export default function HomePage() {
@@ -130,25 +128,24 @@ export default function HomePage() {
   const isMobile = useIsMobile(1100);
 
   const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
-  const token = useMemo(() => localStorage.getItem("token") || "", []);
 
+  // Chat state
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<MessageLike[]>([]);
   const [typingUserId, setTypingUserId] = useState<number | null>(null);
 
+  // Mobile nav
   const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
   const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
   const [mobileChatsDrawerOpen, setMobileChatsDrawerOpen] = useState(false);
 
-  // Filtri ricerca
+  // Search filters
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
-
   const [stateFilter, setStateFilter] = useState("");
   const [mood, setMood] = useState("");
-
   const [visibleOnly, setVisibleOnly] = useState(false);
 
   const [searchResults, setSearchResults] = useState<User[]>([]);
@@ -160,7 +157,7 @@ export default function HomePage() {
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
   const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
 
-  // Notifiche
+  // Notifications (unread + toast + sound)
   const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
   const totalUnread = useMemo(
     () => Object.values(unreadCounts).reduce((a, b) => a + (b || 0), 0),
@@ -173,10 +170,25 @@ export default function HomePage() {
   const [soundLocked, setSoundLocked] = useState(false);
   const lastBeepRef = useRef<number>(0);
 
+  // fallback polling: memorizza ultimo “key” per conversazione
+  const convKeysRef = useRef<Record<number, string>>({});
+  const pollInitedRef = useRef(false);
+
   const showToast = (msg: string) => {
     setToast(msg);
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
     toastTimerRef.current = window.setTimeout(() => setToast(null), 2800);
+  };
+
+  const notifyIncoming = async (msg: string) => {
+    showToast(msg);
+
+    const now = Date.now();
+    if (now - lastBeepRef.current > 900) {
+      lastBeepRef.current = now;
+      const ok = await playNotificationBeep();
+      setSoundLocked(!ok);
+    }
   };
 
   useEffect(() => {
@@ -188,10 +200,16 @@ export default function HomePage() {
     unlockAudio().then((ok) => setSoundLocked(!ok));
   }, []);
 
-  async function loadConversations() {
+  async function loadConversationsInitial() {
     try {
       const list = await fetchConversations();
       setConversations(list);
+
+      // inizializza chiavi per polling (senza notificare)
+      const nextKeys: Record<number, string> = {};
+      for (const c of list as any) nextKeys[(c as any).id] = getConversationKey(c);
+      convKeysRef.current = nextKeys;
+      pollInitedRef.current = true;
 
       if (!isMobile && !selectedConversation && list.length > 0) {
         selectConversation(list[0]);
@@ -225,7 +243,7 @@ export default function HomePage() {
   }
 
   useEffect(() => {
-    loadConversations();
+    loadConversationsInitial();
     loadRelationships();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -235,30 +253,34 @@ export default function HomePage() {
     setUnreadCounts((prev) => ({ ...prev, [conv.id]: 0 }));
   };
 
+  // ✅ Socket realtime (se funziona)
   const socket = useChatSocket(user ? user.id : null, {
     onMessage: async ({ conversationId, message }) => {
       const convId = Number(conversationId);
-      loadConversations();
+
+      // aggiorna chiave per evitare doppia notifica col polling
+      if (message?.id) convKeysRef.current[convId] = String(message.id);
+      else if ((message as any)?.createdAt) convKeysRef.current[convId] = String((message as any).createdAt);
 
       const isMine = message?.senderId && user?.id ? message.senderId === user.id : false;
 
+      // se chat aperta -> append e segna letta
       if (selectedConversation?.id === convId) {
         setMessages((prev) => upsertMessage(prev, message));
         setUnreadCounts((prev) => ({ ...prev, [convId]: 0 }));
       } else {
         setUnreadCounts((prev) => ({ ...prev, [convId]: (prev[convId] || 0) + 1 }));
-        const name = message?.sender?.displayName || "Qualcuno";
-        showToast(`Nuovo messaggio da ${name}`);
-      }
-
-      if (!isMine) {
-        const now = Date.now();
-        if (now - lastBeepRef.current > 900) {
-          lastBeepRef.current = now;
-          const ok = await playNotificationBeep();
-          setSoundLocked(!ok);
+        if (!isMine) {
+          const name = message?.sender?.displayName || "Qualcuno";
+          await notifyIncoming(`Nuovo messaggio da ${name}`);
         }
       }
+
+      // aggiorna lista conversazioni (preview)
+      try {
+        const list = await fetchConversations();
+        setConversations(list);
+      } catch {}
     },
 
     onTyping: ({ conversationId, userId }) => {
@@ -276,6 +298,61 @@ export default function HomePage() {
     if (isMobile) setMobileScreen("chat");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversation?.id]);
+
+  // ✅ Polling fallback notifiche (anche se socket non funziona su mobile)
+  useEffect(() => {
+    if (!user) return;
+
+    let alive = true;
+
+    const tick = async () => {
+      try {
+        const list = await fetchConversations();
+        if (!alive) return;
+
+        setConversations(list);
+
+        // se non inizializzato (per sicurezza)
+        if (!pollInitedRef.current) {
+          const initKeys: Record<number, string> = {};
+          for (const c of list as any) initKeys[(c as any).id] = getConversationKey(c);
+          convKeysRef.current = initKeys;
+          pollInitedRef.current = true;
+          return;
+        }
+
+        // confronta key
+        const prevKeys = convKeysRef.current;
+        const nextKeys: Record<number, string> = { ...prevKeys };
+
+        for (const c of list as any) {
+          const id = Number((c as any).id);
+          const nextKey = getConversationKey(c);
+          const prevKey = prevKeys[id];
+
+          // se cambia key e NON sto guardando quella chat -> notifica
+          if (prevKey && nextKey && nextKey !== prevKey && selectedConversation?.id !== id) {
+            setUnreadCounts((prev) => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
+            await notifyIncoming("Nuovo messaggio ricevuto");
+          }
+
+          nextKeys[id] = nextKey;
+        }
+
+        convKeysRef.current = nextKeys;
+      } catch {
+        // silenzioso (polling non deve rompere la UI)
+      }
+    };
+
+    tick();
+    const timer = window.setInterval(tick, 12000);
+
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, [user?.id, selectedConversation?.id]); // aggiorna logica se cambi chat
 
   const handleSend = (content: string) => {
     if (!selectedConversation) return;
@@ -299,7 +376,8 @@ export default function HomePage() {
 
     try {
       await deleteConversation(selectedConversation.id);
-      await loadConversations();
+      const list = await fetchConversations();
+      setConversations(list);
       setSelectedConversation(null);
       setMessages([]);
       if (isMobile) setMobileScreen("list");
@@ -325,21 +403,26 @@ export default function HomePage() {
       return;
     }
 
+    // ✅ token letto al momento della richiesta
+    const tokenNow = getAuthToken();
+    if (!tokenNow) {
+      setSearchLoading(false);
+      setSearchError("Sessione non valida: fai logout/login (token mancante).");
+      return;
+    }
+
     try {
       const params = new URLSearchParams();
       if (qTrim) params.set("q", qTrim);
       if (cityTrim) params.set("city", cityTrim);
       if (areaTrim) params.set("area", areaTrim);
 
-      // Mood/State li passiamo (se backend li supporta)
       if (mood) params.set("mood", mood);
       if (stateFilter) params.set("state", stateFilter);
-
-      // visibile a tutti
       if (visibleOnly) params.set("visibleOnly", "true");
 
       const r = await fetch(`${baseUrl}/users?${params.toString()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        headers: { Authorization: `Bearer ${tokenNow}` },
       });
 
       if (!r.ok) {
@@ -348,13 +431,18 @@ export default function HomePage() {
           const data = await r.json();
           if (data?.error) msg = data.error;
         } catch {}
+
+        // messaggio più chiaro
+        if (msg.toLowerCase().includes("token")) {
+          msg = "Sessione scaduta o token non valido. Rifai il login.";
+        }
         throw new Error(msg);
       }
 
       let users: any[] = await r.json();
       users = users.filter((u) => u.id !== user?.id);
 
-      // filtro lato client (sicuro anche se backend non filtra)
+      // filtro client-side (sicuro)
       if (visibleOnly) users = users.filter((u) => u.state === "VISIBILE_A_TUTTI");
       if (stateFilter && stateFilter !== "VISIBILE_A_TUTTI") users = users.filter((u) => u.state === stateFilter);
       if (mood) users = users.filter((u) => u.mood === mood);
@@ -372,7 +460,8 @@ export default function HomePage() {
   const startChatWithUser = async (u: User) => {
     try {
       const conv = await createConversation((u as any).id);
-      await loadConversations();
+      const list = await fetchConversations();
+      setConversations(list);
       selectConversation(conv);
 
       if (isMobile) {
@@ -433,15 +522,12 @@ export default function HomePage() {
           <input style={inputStyle} placeholder="Città" value={city} onChange={(e) => setCity(e.target.value)} />
           <input style={inputStyle} placeholder="Zona / Area" value={area} onChange={(e) => setArea(e.target.value)} />
 
-          {/* Stato: identico al Profilo */}
           <select
             style={inputStyle as any}
             value={stateFilter}
             onChange={(e) => {
               const v = e.target.value;
               setStateFilter(v);
-
-              // se seleziona visibile a tutti, attiva anche checkbox
               if (v === "VISIBILE_A_TUTTI") setVisibleOnly(true);
               else if (visibleOnly) setVisibleOnly(false);
             }}
@@ -453,7 +539,6 @@ export default function HomePage() {
             ))}
           </select>
 
-          {/* Mood: identico al Profilo */}
           <select style={inputStyle as any} value={mood} onChange={(e) => setMood(e.target.value)}>
             {MOOD_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>
@@ -520,28 +605,6 @@ export default function HomePage() {
           </div>
         </form>
 
-        {soundLocked && (
-          <button
-            type="button"
-            onClick={async () => {
-              const ok = await unlockAudio();
-              setSoundLocked(!ok);
-              if (ok) await playNotificationBeep();
-            }}
-            style={{
-              borderRadius: 12,
-              padding: "10px 12px",
-              border: "1px solid #2a2a2a",
-              background: "transparent",
-              fontSize: 12,
-              color: "var(--tiko-text-dim)",
-              cursor: "pointer",
-            }}
-          >
-            Attiva suono notifiche
-          </button>
-        )}
-
         {searchError && <div style={{ color: "red", fontSize: 13 }}>{searchError}</div>}
         {friendRequestMsg && <div style={{ color: "var(--tiko-text-dim)", fontSize: 13 }}>{friendRequestMsg}</div>}
 
@@ -551,10 +614,6 @@ export default function HomePage() {
               const isFriend = friendIds.has(u.id);
               const isPendingSent = sentRequestUserIds.has(u.id);
 
-              const avatar = resolveAvatar(u.avatarUrl);
-              const st = u.state || "";
-              const md = u.mood || "";
-
               return (
                 <div
                   key={u.id}
@@ -563,81 +622,40 @@ export default function HomePage() {
                     borderRadius: 14,
                     background: "var(--tiko-bg-card)",
                     border: "1px solid #2a2a2a",
-                    display: "flex",
-                    gap: 10,
-                    alignItems: "flex-start",
                   }}
                 >
-                  <div style={{ position: "relative", width: 40, height: 40, flexShrink: 0 }}>
-                    {avatar ? (
-                      <img src={avatar} alt="avatar" width={40} height={40} style={{ width: 40, height: 40, borderRadius: 999, objectFit: "cover", border: "1px solid #333" }} />
-                    ) : (
-                      <div
-                        style={{
-                          width: 40,
-                          height: 40,
-                          borderRadius: 999,
-                          background: "#1f1f26",
-                          border: "1px solid #333",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontWeight: 950,
-                        }}
-                      >
-                        {(u.displayName || u.username || "U").slice(0, 1).toUpperCase()}
-                      </div>
-                    )}
-
-                    <div
-                      title={st}
-                      style={{
-                        position: "absolute",
-                        right: -1,
-                        bottom: -1,
-                        width: 12,
-                        height: 12,
-                        borderRadius: 999,
-                        background: stateColor(st),
-                        border: "2px solid var(--tiko-bg-card)",
-                      }}
-                    />
+                  <div style={{ fontSize: 13 }}>
+                    <strong>{u.displayName}</strong> <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
                   </div>
 
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ fontSize: 13 }}>
-                      <strong>{u.displayName}</strong> <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
-                    </div>
-
-                    {(u.city || u.area) && (
-                      <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                        {[u.city, u.area].filter(Boolean).join(" • ")}
-                      </div>
-                    )}
-
+                  {(u.city || u.area) && (
                     <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                      Mood: <strong style={{ color: "var(--tiko-text)" }}>{md || "—"}</strong>
+                      {[u.city, u.area].filter(Boolean).join(" • ")}
                     </div>
+                  )}
 
-                    <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                      <button type="button" onClick={() => startChatWithUser(u)} style={{ fontSize: 12, cursor: "pointer" }}>
-                        Apri chat
-                      </button>
+                  <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                    Mood: <strong style={{ color: "var(--tiko-text)" }}>{u.mood || "—"}</strong>
+                  </div>
 
-                      <button
-                        type="button"
-                        disabled={isFriend || isPendingSent}
-                        onClick={() => handleSendFriendRequest(u)}
-                        style={{
-                          fontSize: 12,
-                          background: isFriend || isPendingSent ? "#444" : "var(--tiko-mint)",
-                          color: isFriend || isPendingSent ? "#bbb" : "#000",
-                          cursor: isFriend || isPendingSent ? "not-allowed" : "pointer",
-                        }}
-                      >
-                        {isFriend ? "Già amici" : isPendingSent ? "Richiesta inviata" : "Aggiungi amico"}
-                      </button>
-                    </div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+                    <button type="button" onClick={() => startChatWithUser(u)} style={{ fontSize: 12, cursor: "pointer" }}>
+                      Apri chat
+                    </button>
+
+                    <button
+                      type="button"
+                      disabled={isFriend || isPendingSent}
+                      onClick={() => handleSendFriendRequest(u)}
+                      style={{
+                        fontSize: 12,
+                        background: isFriend || isPendingSent ? "#444" : "var(--tiko-mint)",
+                        color: isFriend || isPendingSent ? "#bbb" : "#000",
+                        cursor: isFriend || isPendingSent ? "not-allowed" : "pointer",
+                      }}
+                    >
+                      {isFriend ? "Già amici" : isPendingSent ? "Richiesta inviata" : "Aggiungi amico"}
+                    </button>
                   </div>
                 </div>
               );
@@ -645,27 +663,6 @@ export default function HomePage() {
           </div>
         )}
       </div>
-
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            top: 14,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 20000,
-            padding: "10px 14px",
-            borderRadius: 14,
-            background: "rgba(0,0,0,0.85)",
-            border: "1px solid #333",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 950,
-          }}
-        >
-          {toast}
-        </div>
-      )}
     </div>
   );
 
@@ -709,8 +706,58 @@ export default function HomePage() {
 
   if (!user) return <div>Non autenticato</div>;
 
+  // ✅ TOAST globale sempre visibile (web + mobile, qualsiasi tab)
+  const GlobalToast = toast ? (
+    <div
+      style={{
+        position: "fixed",
+        top: 14,
+        left: "50%",
+        transform: "translateX(-50%)",
+        zIndex: 20000,
+        padding: "10px 14px",
+        borderRadius: 14,
+        background: "rgba(0,0,0,0.88)",
+        border: "1px solid #333",
+        color: "#fff",
+        fontSize: 13,
+        fontWeight: 950,
+      }}
+    >
+      {toast}
+    </div>
+  ) : null;
+
+  // ✅ pulsante sempre visibile se audio bloccato
+  const SoundUnlock = soundLocked ? (
+    <button
+      type="button"
+      onClick={async () => {
+        const ok = await unlockAudio();
+        setSoundLocked(!ok);
+        if (ok) await playNotificationBeep();
+      }}
+      style={{
+        position: "fixed",
+        right: 12,
+        bottom: 12,
+        zIndex: 20001,
+        borderRadius: 14,
+        padding: "10px 12px",
+        border: "1px solid #2a2a2a",
+        background: "rgba(0,0,0,0.75)",
+        color: "#fff",
+        fontWeight: 950,
+        cursor: "pointer",
+      }}
+      title="Per i suoni il browser richiede un click"
+    >
+      Attiva suono
+    </button>
+  ) : null;
+
+  // MOBILE
   if (isMobile) {
-    // MOBILE = niente colonne: così non si schiaccia mai la chat
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
@@ -759,6 +806,9 @@ export default function HomePage() {
             />
           </div>
         )}
+
+        {GlobalToast}
+        {SoundUnlock}
       </div>
     );
   }
@@ -806,6 +856,9 @@ export default function HomePage() {
           />
         </div>
       </div>
+
+      {GlobalToast}
+      {SoundUnlock}
     </div>
   );
 }
