@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../../config";
 import { useAuth } from "../../AuthContext";
 
@@ -9,7 +9,12 @@ function useIsMobile(breakpointPx = 1100) {
       typeof window !== "undefined" &&
       typeof window.matchMedia === "function" &&
       window.matchMedia("(pointer: coarse)").matches;
-    return coarse || window.innerWidth < breakpointPx;
+
+    const ua =
+      typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
+
+    return coarse || uaMobile || window.innerWidth < breakpointPx;
   };
 
   const [isMobile, setIsMobile] = useState(compute);
@@ -67,7 +72,6 @@ const STATE_UI: Record<string, { label: string; color: string }> = {
   INVISIBILE: { label: "Invisibile", color: "#9b59b6" },
   VISIBILE_A_TUTTI: { label: "Visibile a tutti", color: "#3ABEFF" },
 
-  // compatibilità eventuale vecchia enum
   ONLINE: { label: "Disponibile", color: "#2ecc71" },
   AWAY: { label: "Assente", color: "#f39c12" },
 };
@@ -130,17 +134,11 @@ export default function Sidebar() {
   const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // friend requests badge + toast
-  const [pendingRequests, setPendingRequests] = useState(0);
-  const prevPendingRef = useRef(0);
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimerRef = useRef<number | null>(null);
+  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
+  const view = searchParams.get("view") || ""; // chats | search | chat
 
-  const showToast = (msg: string) => {
-    setToast(msg);
-    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 3200);
-  };
+  // friend requests badge
+  const [pendingRequests, setPendingRequests] = useState(0);
 
   const fetchPendingRequests = async () => {
     try {
@@ -170,40 +168,22 @@ export default function Sidebar() {
 
   useEffect(() => {
     fetchPendingRequests();
-
-    const onFocus = () => fetchPendingRequests();
-    window.addEventListener("focus", onFocus);
-
     const timer = window.setInterval(() => {
       if (document.visibilityState === "visible") fetchPendingRequests();
     }, 15000);
-
-    return () => {
-      window.removeEventListener("focus", onFocus);
-      window.clearInterval(timer);
-    };
+    return () => window.clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  useEffect(() => {
-    const prev = prevPendingRef.current;
-    if (pendingRequests > prev) showToast("Nuova richiesta di amicizia");
-    prevPendingRef.current = pendingRequests;
-  }, [pendingRequests]);
 
   // chiudi drawer quando cambi pagina
   useEffect(() => {
     if (drawerOpen) setDrawerOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname + location.search]);
+  }, [location.pathname, location.search]);
 
   const avatarUrl = resolveUrlMaybeBackend((user as any)?.avatarUrl);
 
-  const homeTo = isMobile ? "/?view=chats" : "/";
-  const chatTo = "/?view=chats";
-  const searchTo = "/?view=search";
-
-  const linkStyle = ({ isActive }: { isActive: boolean }) => ({
+  const baseItemStyle: React.CSSProperties = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
@@ -212,11 +192,12 @@ export default function Sidebar() {
     borderRadius: 12,
     textDecoration: "none",
     color: "var(--tiko-text)",
-    background: isActive ? "var(--tiko-bg-card)" : "transparent",
     border: "1px solid #222",
     marginBottom: 10,
-    fontWeight: 800 as const,
-  });
+    fontWeight: 800,
+  };
+
+  const activeBg = "var(--tiko-bg-card)";
 
   const HeaderBlock = (
     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
@@ -258,9 +239,7 @@ export default function Sidebar() {
               border: "1px solid #333",
               display: "block",
             }}
-            onError={(e) => {
-              (e.currentTarget as any).style.display = "none";
-            }}
+            onError={(e) => ((e.currentTarget as any).style.display = "none")}
           />
         ) : (
           <div
@@ -313,42 +292,73 @@ export default function Sidebar() {
     </div>
   );
 
-  const Nav = (
+  const DesktopNav = (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-      {/* Su mobile “Home” punta direttamente alle chat */}
-      <NavLink to={homeTo} style={linkStyle}>
+      <NavLink to="/" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Home</span>
       </NavLink>
 
-      {/* ✅ Viste dedicate mobile (URL dedicati) */}
-      <NavLink to={chatTo} style={linkStyle}>
-        <span>Chat</span>
-      </NavLink>
-
-      <NavLink to={searchTo} style={linkStyle}>
-        <span>Cerca persone</span>
-      </NavLink>
-
-      <NavLink to="/friends" style={linkStyle}>
+      <NavLink to="/friends" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Amici</span>
         <Badge n={pendingRequests} />
       </NavLink>
 
-      <NavLink to="/profile" style={linkStyle}>
+      <NavLink to="/profile" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Profilo</span>
       </NavLink>
 
-      <NavLink to="/terms" style={linkStyle}>
+      <NavLink to="/terms" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Termini</span>
       </NavLink>
 
-      <NavLink to="/privacy" style={linkStyle}>
+      <NavLink to="/privacy" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Privacy</span>
       </NavLink>
     </div>
   );
 
-  // MOBILE: topbar + drawer
+  const MobileNav = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+      {/* PAGINE DEDICATE (via query param) */}
+      <Link
+        to="/?view=chats"
+        style={{
+          ...baseItemStyle,
+          background: location.pathname === "/" && (view === "" || view === "chats" || view === "chat") ? activeBg : "transparent",
+        }}
+      >
+        <span>Chat</span>
+      </Link>
+
+      <Link
+        to="/?view=search"
+        style={{
+          ...baseItemStyle,
+          background: location.pathname === "/" && view === "search" ? activeBg : "transparent",
+        }}
+      >
+        <span>Cerca</span>
+      </Link>
+
+      <NavLink to="/friends" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
+        <span>Amici</span>
+        <Badge n={pendingRequests} />
+      </NavLink>
+
+      <NavLink to="/profile" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
+        <span>Profilo</span>
+      </NavLink>
+
+      <NavLink to="/terms" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
+        <span>Termini</span>
+      </NavLink>
+
+      <NavLink to="/privacy" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
+        <span>Privacy</span>
+      </NavLink>
+    </div>
+  );
+
   if (isMobile) {
     return (
       <>
@@ -439,7 +449,7 @@ export default function Sidebar() {
             >
               {HeaderBlock}
               {UserBlock}
-              <div style={{ flex: 1, overflowY: "auto" }}>{Nav}</div>
+              <div style={{ flex: 1, overflowY: "auto" }}>{MobileNav}</div>
 
               <button
                 type="button"
@@ -458,27 +468,6 @@ export default function Sidebar() {
                 Chiudi
               </button>
             </div>
-          </div>
-        )}
-
-        {toast && (
-          <div
-            style={{
-              position: "fixed",
-              left: 12,
-              right: 12,
-              bottom: 12,
-              zIndex: 21000,
-              padding: "10px 12px",
-              borderRadius: 14,
-              background: "rgba(0,0,0,0.85)",
-              border: "1px solid #333",
-              color: "#fff",
-              fontSize: 13,
-              fontWeight: 950,
-            }}
-          >
-            {toast}
           </div>
         )}
       </>
@@ -502,27 +491,7 @@ export default function Sidebar() {
     >
       {HeaderBlock}
       {UserBlock}
-      <div style={{ flex: 1, overflowY: "auto" }}>{Nav}</div>
-
-      {toast && (
-        <div
-          style={{
-            position: "absolute",
-            left: 12,
-            right: 12,
-            bottom: 12,
-            padding: "10px 12px",
-            borderRadius: 14,
-            background: "rgba(0,0,0,0.85)",
-            border: "1px solid #333",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 950,
-          }}
-        >
-          {toast}
-        </div>
-      )}
+      <div style={{ flex: 1, overflowY: "auto" }}>{DesktopNav}</div>
     </div>
   );
 }
