@@ -4,7 +4,7 @@ import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import "./index.css";
 
 import { AuthProvider } from "./AuthContext";
-import { LanguageProvider } from "./i18n/LanguageProvider";
+import { LanguageProvider } from "./LanguageContext";
 
 import HomePage from "./pages/HomePage";
 import AuthPage from "./pages/AuthPage";
