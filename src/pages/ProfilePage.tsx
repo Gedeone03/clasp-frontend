@@ -1,424 +1,231 @@
-// src/pages/ProfilePage.tsx
-
-import React, { useEffect, useRef, useState } from "react";
-import Sidebar from "../components/ui/Sidebar";
+import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { API_BASE_URL } from "../config";
 import { useAuth } from "../AuthContext";
-import { updateMe, uploadAvatar, User } from "../api";
-import { useI18n } from "../LanguageContext";
 
-const VALID_STATES = [
-  "DISPONIBILE",
-  "OCCUPATO",
-  "ASSENTE",
-  "OFFLINE",
-  "INVISIBILE",
-  "VISIBILE_A_TUTTI",
-];
-
-const VALID_INTERESTS = [
-  "LAVORO",
-  "AMICIZIA",
-  "CHATTARE",
-  "DATING",
-  "INCONTRI",
-];
-
-// Solo chiavi mood (le label le prendiamo da i18n)
-const VALID_MOOD_KEYS = [
-  "FELICE",
-  "TRISTE",
-  "STRESSATO",
-  "ANNOIATO",
-  "RILASSATO",
-  "VOGLIA_DI_PARLARE",
-  "CERCO_COMPAGNIA",
-  "VOGLIA_DI_RIDERE",
-  "CURIOSO",
-  "MOTIVATO",
-];
-
-function StatusDot({ state }: { state: string }) {
-  const colors: Record<string, string> = {
-    DISPONIBILE: "#4CAF50",
-    OCCUPATO: "#F44336",
-    ASSENTE: "#FF9800",
-    OFFLINE: "#9E9E9E",
-    INVISIBILE: "#BDBDBD",
-    VISIBILE_A_TUTTI: "#2196F3",
-  };
-
-  const color = colors[state] || "#9E9E9E";
-
-  return (
-    <span
-      style={{
-        width: 14,
-        height: 14,
-        borderRadius: "50%",
-        background: color,
-        display: "inline-block",
-        marginRight: 8,
-        border: "2px solid #111",
-        boxShadow: `0 0 10px ${color}`,
-      }}
-    />
-  );
+function useIsMobile(breakpointPx: number = 900) {
+  const [m, setM] = useState(() => (typeof window !== "undefined" ? window.innerWidth < breakpointPx : false));
+  useEffect(() => {
+    const on = () => setM(window.innerWidth < breakpointPx);
+    window.addEventListener("resize", on);
+    return () => window.removeEventListener("resize", on);
+  }, [breakpointPx]);
+  return m;
 }
 
-const ProfilePage: React.FC = () => {
-  const { user, setUser, logout } = useAuth();
-  const { t } = useI18n();
+function resolveAvatar(url?: string | null): string | null {
+  if (!url) return null;
+  if (url.startsWith("http://") || url.startsWith("https://")) return url;
+  return `${API_BASE_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+}
 
-  const [profileState, setProfileState] = useState("OFFLINE");
+export default function ProfilePage() {
+  const nav = useNavigate();
+  const isMobile = useIsMobile(900);
+  const { user, refreshMe } = useAuth();
+
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  // campi editabili (se il tuo backend li supporta)
+  const [displayName, setDisplayName] = useState("");
   const [statusText, setStatusText] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
-  const [interests, setInterests] = useState<string[]>([]);
-  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
-  const [mood, setMood] = useState<string | undefined>(undefined);
+  const [mood, setMood] = useState("");
+  const [state, setState] = useState("");
 
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
-
-  // Helper: traduce mood dalla chiave (es. FELICE -> t(mood_FELICE))
-  const tMood = (key?: string | null) => {
-    if (!key) return "";
-    const label = t(`mood_${key}`);
-    return label === `mood_${key}` ? key : label;
-  };
+  const title = useMemo(() => "Profilo", []);
 
   useEffect(() => {
-    if (!user) return;
-    setProfileState(user.state);
-    setStatusText(user.statusText || "");
-    setCity(user.city || "");
-    setArea(user.area || "");
-    setInterests(user.interests || []);
-    setAvatarUrl(user.avatarUrl || null);
-    setMood(user.mood || undefined);
+    setDisplayName(user?.displayName || "");
+    setStatusText((user as any)?.statusText || "");
+    setCity((user as any)?.city || "");
+    setArea((user as any)?.area || "");
+    setMood((user as any)?.mood || "");
+    setState((user as any)?.state || "");
   }, [user]);
 
-  if (!user) return <div>Not authenticated</div>;
+  const wrapStyle: React.CSSProperties = isMobile
+    ? { position: "fixed", inset: 0, zIndex: 9999, background: "var(--tiko-bg-dark)", overflowY: "auto" }
+    : { minHeight: "100%" };
 
-  const toggleInterest = (interest: string) => {
-    setSaved(false);
-    setInterests((prev) =>
-      prev.includes(interest) ? prev.filter((i) => i !== interest) : [...prev, interest]
-    );
+  const cardStyle: React.CSSProperties = {
+    background: "var(--tiko-bg-card)",
+    border: "1px solid #222",
+    borderRadius: 14,
+    padding: 12,
   };
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setSaving(true);
-    setSaved(false);
-    setError(null);
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #2a2a2a",
+    background: "var(--tiko-bg-dark)",
+    color: "var(--tiko-text)",
+  };
 
+  async function saveProfile() {
+    setErr(null);
+    setMsg(null);
+    setSaving(true);
     try {
-      const updated: User = await updateMe({
-        state: profileState,
-        statusText: statusText || undefined,
-        city: city || undefined,
-        area: area || undefined,
-        interests,
-        avatarUrl: avatarUrl || undefined,
-        mood: mood || undefined,
+      const token = localStorage.getItem("token") || localStorage.getItem("authToken") || "";
+      const t = token.toLowerCase().startsWith("bearer ") ? token.slice(7).trim() : token.trim();
+
+      const res = await fetch(`${API_BASE_URL}/me`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          ...(t ? { Authorization: `Bearer ${t}` } : {}),
+        },
+        body: JSON.stringify({
+          displayName,
+          statusText,
+          city: city || null,
+          area: area || null,
+          mood: mood || null,
+          state: state || null,
+        }),
       });
-      setUser(updated);
-      setSaved(true);
-    } catch (err: any) {
-      setError(err?.response?.data?.error || "Save error");
+
+      const data = await res.json().catch(() => null);
+
+      if (!res.ok) throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
+
+      setMsg("Profilo aggiornato.");
+      await refreshMe();
+    } catch (e: any) {
+      setErr(String(e?.message || "Errore salvataggio profilo."));
     } finally {
       setSaving(false);
     }
-  };
-
-  const handleClickChangeAvatar = () => fileInputRef.current?.click();
-
-  const handleAvatarFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    try {
-      setUploadingAvatar(true);
-      const url = await uploadAvatar(file);
-      setAvatarUrl(url);
-      setSaved(false);
-    } catch {
-      setError("Avatar upload error");
-    } finally {
-      setUploadingAvatar(false);
-      e.target.value = "";
-    }
-  };
+  }
 
   return (
-    <div className="tiko-layout">
-      <Sidebar />
+    <div style={wrapStyle}>
+      <div style={{ padding: 14, maxWidth: 900, margin: "0 auto" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <button
+              type="button"
+              onClick={() => nav("/", { replace: false })}
+              style={{
+                padding: "8px 10px",
+                borderRadius: 12,
+                border: "1px solid #2a2a2a",
+                background: "transparent",
+                cursor: "pointer",
+                fontWeight: 950,
+              }}
+              aria-label="Indietro"
+            >
+              ←
+            </button>
+            <h2 style={{ margin: 0 }}>{title}</h2>
+          </div>
 
-      <div className="tiko-content" style={{ padding: 24, overflowY: "auto" }}>
-        {/* Header */}
-        <div
-          style={{
-            marginBottom: 20,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 16,
-          }}
-        >
-          <h1 className="tiko-title">{t("profileTitle")}</h1>
-          <button onClick={logout} style={{ background: "var(--tiko-magenta)" }}>
-            {t("profileLogout")}
+          <button
+            type="button"
+            onClick={() => saveProfile()}
+            disabled={saving}
+            style={{
+              padding: "8px 10px",
+              borderRadius: 12,
+              border: "1px solid #2a2a2a",
+              background: "var(--tiko-mint)",
+              color: "#000",
+              fontWeight: 950,
+              cursor: saving ? "not-allowed" : "pointer",
+              opacity: saving ? 0.7 : 1,
+            }}
+          >
+            {saving ? "Salvo..." : "Salva"}
           </button>
         </div>
 
-        {/* Card avatar + info */}
-        <div
-          className="tiko-card"
-          style={{
-            marginBottom: 20,
-            display: "flex",
-            gap: 16,
-            alignItems: "center",
-          }}
-        >
-          <div style={{ position: "relative" }}>
-            {avatarUrl ? (
-              <img
-                src={avatarUrl}
-                alt="Avatar"
-                style={{
-                  width: 80,
-                  height: 80,
-                  borderRadius: "50%",
-                  objectFit: "cover",
-                  boxShadow: "var(--tiko-glow)",
-                  border: "2px solid var(--tiko-purple)",
-                }}
-              />
-            ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
+          <div style={cardStyle}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
               <div
                 style={{
-                  width: 80,
-                  height: 80,
-                  borderRadius: "50%",
-                  background:
-                    "linear-gradient(140deg, var(--tiko-purple), var(--tiko-blue))",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  fontWeight: 800,
-                  fontSize: 26,
-                  color: "white",
-                  textShadow: "var(--tiko-glow)",
+                  width: 68,
+                  height: 68,
+                  borderRadius: 999,
+                  overflow: "hidden",
+                  border: "1px solid #2a2a2a",
+                  background: "#111",
+                  flex: "0 0 auto",
                 }}
               >
-                {(user.displayName || user.username)
-                  .split(" ")
-                  .map((p) => p[0])
-                  .join("")
-                  .slice(0, 2)
-                  .toUpperCase()}
+                {resolveAvatar((user as any)?.avatarUrl) ? (
+                  <img
+                    src={resolveAvatar((user as any)?.avatarUrl)!}
+                    alt=""
+                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                  />
+                ) : null}
               </div>
-            )}
+              <div style={{ minWidth: 0 }}>
+                <div style={{ fontWeight: 950, fontSize: 18, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {user?.displayName || user?.username || "Utente"}
+                </div>
+                <div style={{ color: "var(--tiko-text-dim)", fontSize: 12 }}>
+                  @{user?.username || ""}
+                </div>
+              </div>
+            </div>
 
-            <button
-              type="button"
-              onClick={handleClickChangeAvatar}
-              style={{
-                position: "absolute",
-                bottom: -4,
-                right: -4,
-                background: "var(--tiko-purple)",
-                borderRadius: "50%",
-                width: 28,
-                height: 28,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                fontSize: 16,
-              }}
-              title={t("profileChangePhoto")}
-            >
-              📷
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              style={{ display: "none" }}
-              onChange={handleAvatarFileChange}
-            />
+            {err && <div style={{ marginTop: 10, color: "#ff6b6b", fontWeight: 950 }}>Errore: {err}</div>}
+            {msg && <div style={{ marginTop: 10, color: "var(--tiko-text-dim)", fontWeight: 900 }}>{msg}</div>}
           </div>
 
-          <div style={{ flex: 1 }}>
-            <div style={{ marginBottom: 4 }}>
-              <strong>{t("profileName")}:</strong> {user.displayName}
-            </div>
-            <div style={{ marginBottom: 4 }}>
-              <strong>{t("profileUsername")}:</strong> @{user.username}
-            </div>
-            <div style={{ marginBottom: 4 }}>
-              <strong>{t("profileEmail")}:</strong> {user.email}
-            </div>
-            {user.mood && (
-              <div style={{ marginTop: 6, fontSize: 13, color: "var(--tiko-text-dim)" }}>
-                <strong>{t("profileCurrentMood")}:</strong> {tMood(user.mood)}
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 950, marginBottom: 10 }}>Dati profilo</div>
+
+            <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Nome visualizzato</label>
+            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={inputStyle} />
+
+            <div style={{ height: 10 }} />
+
+            <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Status</label>
+            <input value={statusText} onChange={(e) => setStatusText(e.target.value)} style={inputStyle} />
+
+            <div style={{ height: 10 }} />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Città</label>
+                <input value={city} onChange={(e) => setCity(e.target.value)} style={inputStyle} />
               </div>
-            )}
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Zona</label>
+                <input value={area} onChange={(e) => setArea(e.target.value)} style={inputStyle} />
+              </div>
+            </div>
+
+            <div style={{ height: 10 }} />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Mood</label>
+                <input value={mood} onChange={(e) => setMood(e.target.value)} style={inputStyle} placeholder="es. FELICE" />
+              </div>
+              <div>
+                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Stato</label>
+                <input value={state} onChange={(e) => setState(e.target.value)} style={inputStyle} placeholder="es. DISPONIBILE" />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, color: "var(--tiko-text-dim)", fontSize: 12 }}>
+              Nota: se nel tuo backend mood/state sono a scelta (select), puoi sostituire questi input con select.
+              Qui li lascio “safe” per non romperti nulla.
+            </div>
           </div>
-        </div>
-
-        {/* Card settings */}
-        <div className="tiko-card">
-          <h2 style={{ marginBottom: 12 }}>{t("profileSectionTitle")}</h2>
-
-          <form
-            onSubmit={handleSave}
-            style={{ display: "flex", flexDirection: "column", gap: 12 }}
-          >
-            {/* Stato (presenza) */}
-            <div>
-              <label>
-                <strong>{t("profileStatus")}</strong>
-              </label>
-              <div style={{ display: "flex", alignItems: "center", marginTop: 4 }}>
-                {/* FIX: usa profileState e glow visibile */}
-                <StatusDot state={profileState} />
-                <select
-                  style={{ flex: 1 }}
-                  value={profileState}
-                  onChange={(e) => setProfileState(e.target.value)}
-                >
-                  {VALID_STATES.map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            {/* Status text */}
-            <div>
-              <label>
-                <strong>{t("profileStatusText")}</strong>
-              </label>
-              <input
-                value={statusText}
-                onChange={(e) => setStatusText(e.target.value)}
-                placeholder={t("profileStatusTextPh")}
-                style={{ width: "100%", marginTop: 4 }}
-              />
-            </div>
-
-            {/* Mood */}
-            <div>
-              <label>
-                <strong>{t("profileMood")}</strong>
-              </label>
-              <select
-                style={{ width: "100%", marginTop: 4 }}
-                value={mood || ""}
-                onChange={(e) => setMood(e.target.value === "" ? undefined : e.target.value)}
-              >
-                <option value="">{t("profileMoodNone")}</option>
-                {VALID_MOOD_KEYS.map((key) => (
-                  <option key={key} value={key}>
-                    {tMood(key)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* City/Area */}
-            <div style={{ display: "flex", gap: 8 }}>
-              <div style={{ flex: 1 }}>
-                <label>
-                  <strong>{t("profileCity")}</strong>
-                </label>
-                <input
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder={t("profileCityPh")}
-                  style={{ width: "100%", marginTop: 4 }}
-                />
-              </div>
-              <div style={{ flex: 1 }}>
-                <label>
-                  <strong>{t("profileArea")}</strong>
-                </label>
-                <input
-                  value={area}
-                  onChange={(e) => setArea(e.target.value)}
-                  placeholder={t("profileAreaPh")}
-                  style={{ width: "100%", marginTop: 4 }}
-                />
-              </div>
-            </div>
-
-            {/* Interests */}
-            <div>
-              <label>
-                <strong>{t("profileInterests")}</strong>
-              </label>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
-                {VALID_INTERESTS.map((interest) => (
-                  <label
-                    key={interest}
-                    style={{
-                      border: "1px solid #444",
-                      borderRadius: 20,
-                      padding: "6px 10px",
-                      fontSize: 13,
-                      background: interests.includes(interest)
-                        ? "var(--tiko-purple)"
-                        : "transparent",
-                      color: interests.includes(interest)
-                        ? "#fff"
-                        : "var(--tiko-text-dim)",
-                      cursor: "pointer",
-                    }}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={interests.includes(interest)}
-                      onChange={() => toggleInterest(interest)}
-                      style={{ marginRight: 6 }}
-                    />
-                    {interest}
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {uploadingAvatar && (
-              <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                {t("profileUploadingAvatar")}
-              </div>
-            )}
-
-            {error && <div style={{ color: "red" }}>{error}</div>}
-
-            {saved && !error && (
-              <div style={{ color: "var(--tiko-mint)" }}>
-                {t("profileSavedOk")}
-              </div>
-            )}
-
-            <button type="submit" disabled={saving} style={{ width: 180 }}>
-              {saving ? t("profileSaving") : t("profileSave")}
-            </button>
-          </form>
         </div>
       </div>
     </div>
   );
-};
-
-export default ProfilePage;
+}
