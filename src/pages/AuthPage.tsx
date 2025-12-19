@@ -1,212 +1,274 @@
-// src/pages/AuthPage.tsx
-
 import React, { useState } from "react";
+import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../AuthContext";
-import { useNavigate } from "react-router-dom";
-import { useI18n } from "../LanguageContext";
 
-const AuthPage: React.FC = () => {
+type Mode = "login" | "register";
+
+export default function AuthPage() {
+  const nav = useNavigate();
   const { login, register } = useAuth();
-  const navigate = useNavigate();
-  const { t } = useI18n();
 
-  const [mode, setMode] = useState<"login" | "register">("login");
+  const [mode, setMode] = useState<Mode>("login");
 
-  // LOGIN
-  const [loginEmailOrUsername, setLoginEmailOrUsername] = useState("");
-  const [loginPassword, setLoginPassword] = useState("");
+  // login
+  const [identifier, setIdentifier] = useState("");
+  const [password, setPassword] = useState("");
 
-  // REGISTER
-  const [regEmail, setRegEmail] = useState("");
-  const [regPassword, setRegPassword] = useState("");
-  const [regDisplayName, setRegDisplayName] = useState("");
-  const [regUsername, setRegUsername] = useState("");
-  const [regCity, setRegCity] = useState("");
-  const [regArea, setRegArea] = useState("");
-  const [regTerms, setRegTerms] = useState(false);
+  // register
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [displayName, setDisplayName] = useState("");
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const resetMessages = () => {
+    setMsg(null);
+    setErr(null);
+  };
+
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setError(null);
-    setSubmitting(true);
+    resetMessages();
 
     try {
+      setLoading(true);
+
       if (mode === "login") {
-        if (!loginEmailOrUsername || !loginPassword) {
-          setError(t("authRequiredLogin"));
+        const id = identifier.trim();
+        const pw = password;
+
+        if (!id || !pw) {
+          setErr("Inserisci email/username e password.");
           return;
         }
 
-        await login(loginEmailOrUsername, loginPassword);
-      } else {
-        if (!regEmail || !regPassword || !regDisplayName || !regUsername) {
-          setError(t("authRequiredRegister"));
-          return;
-        }
-
-        if (!regTerms) {
-          setError(t("authMustAcceptTerms"));
-          return;
-        }
-
-        await register(
-          regEmail,
-          regPassword,
-          regDisplayName,
-          regUsername,
-          regCity || undefined,
-          regArea || undefined,
-          true
-        );
+        await login(id, pw);
+        setMsg("Login effettuato.");
+        nav("/", { replace: true });
+        return;
       }
 
-      navigate("/");
-    } catch (err: any) {
-      console.error("AUTH ERROR:", err?.response || err);
-      setError(err?.response?.data?.error || "Request error");
+      // REGISTER
+      const em = email.trim();
+      const un = username.trim();
+      const dn = displayName.trim();
+      const pw = password;
+
+      if (!em || !un || !dn || !pw) {
+        setErr("Compila tutti i campi obbligatori.");
+        return;
+      }
+      if (!termsAccepted) {
+        setErr("Devi accettare i Termini e le Condizioni.");
+        return;
+      }
+
+      await register({
+        email: em,
+        password: pw,
+        username: un,
+        displayName: dn,
+        termsAccepted,
+      });
+
+      setMsg("Registrazione completata.");
+      nav("/", { replace: true });
+    } catch (e: any) {
+      const text = String(e?.message || "Errore durante la richiesta.");
+      setErr(text);
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   };
 
   return (
     <div
       style={{
-        maxWidth: 420,
-        margin: "40px auto",
-        padding: 20,
-        borderRadius: 16,
-        background: "var(--tiko-bg-card)",
-        boxShadow: "var(--tiko-glow)",
+        minHeight: "100vh",
+        background: "var(--tiko-bg-dark)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 16,
       }}
     >
-      <h1
+      <div
         style={{
-          textAlign: "center",
-          marginBottom: 20,
+          width: "min(460px, 100%)",
+          background: "var(--tiko-bg-card)",
+          border: "1px solid #222",
+          borderRadius: 16,
+          padding: 16,
         }}
-        className="tiko-title"
       >
-        {t("appName")}
-      </h1>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <button
+            type="button"
+            onClick={() => {
+              resetMessages();
+              setMode("login");
+            }}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #2a2a2a",
+              background: mode === "login" ? "var(--tiko-purple)" : "transparent",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            Login
+          </button>
 
-      <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
-        <button
-          type="button"
-          onClick={() => setMode("login")}
-          style={{
-            flex: 1,
-            background:
-              mode === "login" ? "var(--tiko-purple)" : "var(--tiko-bg-gray)",
-          }}
-        >
-          {t("authLoginTab")}
-        </button>
+          <button
+            type="button"
+            onClick={() => {
+              resetMessages();
+              setMode("register");
+            }}
+            style={{
+              flex: 1,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #2a2a2a",
+              background: mode === "register" ? "var(--tiko-purple)" : "transparent",
+              fontWeight: 900,
+              cursor: "pointer",
+            }}
+          >
+            Registrati
+          </button>
+        </div>
 
-        <button
-          type="button"
-          onClick={() => setMode("register")}
-          style={{
-            flex: 1,
-            background:
-              mode === "register"
-                ? "var(--tiko-purple)"
-                : "var(--tiko-bg-gray)",
-          }}
-        >
-          {t("authRegisterTab")}
-        </button>
-      </div>
-
-      <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-        {mode === "login" ? (
-          <>
-            <input
-              type="text"
-              placeholder={t("authEmailOrUsername")}
-              value={loginEmailOrUsername}
-              onChange={(e) => setLoginEmailOrUsername(e.target.value)}
-            />
-            <input
-              type="password"
-              placeholder={t("authPassword")}
-              value={loginPassword}
-              onChange={(e) => setLoginPassword(e.target.value)}
-            />
-          </>
-        ) : (
-          <>
-            <input
-              type="email"
-              placeholder={t("authEmail")}
-              value={regEmail}
-              onChange={(e) => setRegEmail(e.target.value)}
-            />
-            <input
-              type="password"
-              placeholder={t("authPassword")}
-              value={regPassword}
-              onChange={(e) => setRegPassword(e.target.value)}
-            />
-            <input
-              type="text"
-              placeholder={t("authDisplayName")}
-              value={regDisplayName}
-              onChange={(e) => setRegDisplayName(e.target.value)}
-            />
-            <input
-              type="text"
-              placeholder={t("authUsername")}
-              value={regUsername}
-              onChange={(e) => setRegUsername(e.target.value)}
-            />
-            <input
-              type="text"
-              placeholder={t("authCityOptional")}
-              value={regCity}
-              onChange={(e) => setRegCity(e.target.value)}
-            />
-            <input
-              type="text"
-              placeholder={t("authAreaOptional")}
-              value={regArea}
-              onChange={(e) => setRegArea(e.target.value)}
-            />
-
-            <label style={{ fontSize: 13, marginTop: 4 }}>
+        <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {mode === "login" ? (
+            <>
               <input
-                type="checkbox"
-                checked={regTerms}
-                onChange={(e) => setRegTerms(e.target.checked)}
-                style={{ marginRight: 6 }}
+                placeholder="Email o username"
+                value={identifier}
+                onChange={(e) => setIdentifier(e.target.value)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #2a2a2a",
+                  background: "var(--tiko-bg-dark)",
+                  color: "var(--tiko-text)",
+                }}
               />
-              {t("authAcceptTermsPrefix")}{" "}
-              <a href="/terms" target="_blank" style={{ color: "var(--tiko-blue)" }}>
-                {t("authTerms")}
-              </a>{" "}
-              {t("authAnd")}{" "}
-              <a href="/privacy" target="_blank" style={{ color: "var(--tiko-blue)" }}>
-                {t("authPrivacy")}
-              </a>
-            </label>
-          </>
-        )}
+              <input
+                placeholder="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #2a2a2a",
+                  background: "var(--tiko-bg-dark)",
+                  color: "var(--tiko-text)",
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <input
+                placeholder="Email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #2a2a2a",
+                  background: "var(--tiko-bg-dark)",
+                  color: "var(--tiko-text)",
+                }}
+              />
 
-        {error && <div style={{ color: "red" }}>{error}</div>}
+              <input
+                placeholder="Username"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #2a2a2a",
+                  background: "var(--tiko-bg-dark)",
+                  color: "var(--tiko-text)",
+                }}
+              />
 
-        <button type="submit" disabled={submitting} style={{ marginTop: 8 }}>
-          {submitting
-            ? t("authWait")
-            : mode === "login"
-            ? t("authEnter")
-            : t("authCreateAccount")}
-        </button>
-      </form>
+              <input
+                placeholder="Nome visualizzato"
+                value={displayName}
+                onChange={(e) => setDisplayName(e.target.value)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #2a2a2a",
+                  background: "var(--tiko-bg-dark)",
+                  color: "var(--tiko-text)",
+                }}
+              />
+
+              <input
+                placeholder="Password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                style={{
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid #2a2a2a",
+                  background: "var(--tiko-bg-dark)",
+                  color: "var(--tiko-text)",
+                }}
+              />
+
+              <label style={{ fontSize: 13, color: "var(--tiko-text-dim)" }}>
+                <input
+                  type="checkbox"
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
+                  style={{ marginRight: 8 }}
+                />
+                Accetto i <Link to="/terms">Termini</Link> e la <Link to="/privacy">Privacy</Link>
+              </label>
+            </>
+          )}
+
+          <button
+            type="submit"
+            disabled={loading}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #2a2a2a",
+              background: "var(--tiko-mint)",
+              color: "#000",
+              fontWeight: 950,
+              cursor: loading ? "not-allowed" : "pointer",
+              opacity: loading ? 0.7 : 1,
+            }}
+          >
+            {loading ? "Invio..." : mode === "login" ? "Entra" : "Crea account"}
+          </button>
+
+          {err && (
+            <div style={{ marginTop: 6, color: "#ff6b6b", fontWeight: 800, fontSize: 13 }}>
+              {err}
+            </div>
+          )}
+          {msg && (
+            <div style={{ marginTop: 6, color: "var(--tiko-text-dim)", fontWeight: 800, fontSize: 13 }}>
+              {msg}
+            </div>
+          )}
+        </form>
+      </div>
     </div>
   );
-};
-
-export default AuthPage;
+}
