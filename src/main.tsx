@@ -5,6 +5,10 @@ import "./index.css";
 
 import { AuthProvider } from "./AuthContext";
 
+// ✅ IMPORT I18N PROVIDER
+// Se questo path NON esiste, leggi la nota sotto e correggi l'import.
+import { LanguageProvider } from "./i18n/LanguageProvider";
+
 import HomePage from "./pages/HomePage";
 import AuthPage from "./pages/AuthPage";
 import FriendsPage from "./pages/FriendsPage";
@@ -70,9 +74,12 @@ function App() {
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <BrowserRouter>
-      <AuthProvider>
-        <App />
-      </AuthProvider>
+      {/* ✅ Provider più esterno: copre tutto */}
+      <LanguageProvider>
+        <AuthProvider>
+          <App />
+        </AuthProvider>
+      </LanguageProvider>
     </BrowserRouter>
   </React.StrictMode>
 );
