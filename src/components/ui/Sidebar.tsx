@@ -25,7 +25,6 @@ function useIsMobile(breakpointPx = 1100) {
 }
 
 function ClaspLogo({ size = 34 }: { size?: number }) {
-  // SVG IDENTICO a quello che mi hai inviato (solo scalato)
   return (
     <svg
       width={size}
@@ -196,9 +195,13 @@ export default function Sidebar() {
   useEffect(() => {
     if (drawerOpen) setDrawerOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [location.pathname]);
+  }, [location.pathname + location.search]);
 
   const avatarUrl = resolveUrlMaybeBackend((user as any)?.avatarUrl);
+
+  const homeTo = isMobile ? "/?view=chats" : "/";
+  const chatTo = "/?view=chats";
+  const searchTo = "/?view=search";
 
   const linkStyle = ({ isActive }: { isActive: boolean }) => ({
     display: "flex",
@@ -312,8 +315,18 @@ export default function Sidebar() {
 
   const Nav = (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-      <NavLink to="/" style={linkStyle}>
+      {/* Su mobile “Home” punta direttamente alle chat */}
+      <NavLink to={homeTo} style={linkStyle}>
         <span>Home</span>
+      </NavLink>
+
+      {/* ✅ Viste dedicate mobile (URL dedicati) */}
+      <NavLink to={chatTo} style={linkStyle}>
+        <span>Chat</span>
+      </NavLink>
+
+      <NavLink to={searchTo} style={linkStyle}>
+        <span>Cerca persone</span>
       </NavLink>
 
       <NavLink to="/friends" style={linkStyle}>
@@ -335,7 +348,7 @@ export default function Sidebar() {
     </div>
   );
 
-  // MOBILE: topbar + drawer (non schiaccia mai la chat)
+  // MOBILE: topbar + drawer
   if (isMobile) {
     return (
       <>
@@ -489,7 +502,6 @@ export default function Sidebar() {
     >
       {HeaderBlock}
       {UserBlock}
-
       <div style={{ flex: 1, overflowY: "auto" }}>{Nav}</div>
 
       {toast && (
