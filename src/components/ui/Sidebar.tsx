@@ -3,7 +3,7 @@ import { NavLink, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../../config";
 import { useAuth } from "../../AuthContext";
 
-function useIsMobile(breakpointPx = 900) {
+function useIsMobile(breakpointPx = 1200) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
@@ -11,6 +11,44 @@ function useIsMobile(breakpointPx = 900) {
     return () => window.removeEventListener("resize", onResize);
   }, [breakpointPx]);
   return isMobile;
+}
+
+const STATE_UI: Record<string, { label: string; color: string }> = {
+  DISPONIBILE: { label: "Disponibile", color: "#2ecc71" },
+  OCCUPATO: { label: "Occupato", color: "#ff3b30" },
+  ASSENTE: { label: "Assente", color: "#f39c12" },
+  OFFLINE: { label: "Offline", color: "#95a5a6" },
+  INVISIBILE: { label: "Invisibile", color: "#9b59b6" },
+  VISIBILE_A_TUTTI: { label: "Visibile a tutti", color: "#3ABEFF" },
+
+  // compatibilità (se qualche record vecchio esiste ancora)
+  ONLINE: { label: "Disponibile", color: "#2ecc71" },
+  AWAY: { label: "Assente", color: "#f39c12" },
+};
+
+function stateLabel(state?: string | null) {
+  if (!state) return "—";
+  return STATE_UI[state]?.label ?? state;
+}
+function stateColor(state?: string | null) {
+  if (!state) return "#666";
+  return STATE_UI[state]?.color ?? "#666";
+}
+
+function initials(name?: string | null) {
+  const n = (name || "").trim();
+  if (!n) return "U";
+  const parts = n.split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase()).join("");
+}
+
+function resolveUrlMaybeBackend(url?: string | null) {
+  if (!url) return "";
+  const t = url.trim();
+  if (!t) return "";
+  if (t.startsWith("http://") || t.startsWith("https://")) return t;
+  if (t.startsWith("/")) return `${API_BASE_URL.replace(/\/+$/, "")}${t}`;
+  return t;
 }
 
 function Badge({ n }: { n: number }) {
@@ -39,14 +77,13 @@ function Badge({ n }: { n: number }) {
 }
 
 export default function Sidebar() {
-  const isMobile = useIsMobile(900);
+  const isMobile = useIsMobile(1200);
   const { user } = useAuth();
   const location = useLocation();
 
   const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // friend requests badge + toast
   const [pendingRequests, setPendingRequests] = useState(0);
   const prevPendingRef = useRef(0);
 
@@ -104,17 +141,17 @@ export default function Sidebar() {
 
   useEffect(() => {
     const prev = prevPendingRef.current;
-    if (pendingRequests > prev) {
-      showToast("Nuova richiesta di amicizia");
-    }
+    if (pendingRequests > prev) showToast("Nuova richiesta di amicizia");
     prevPendingRef.current = pendingRequests;
   }, [pendingRequests]);
 
-  // chiudi drawer quando cambi pagina
+  // chiudi drawer se cambi pagina
   useEffect(() => {
     if (drawerOpen) setDrawerOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.pathname]);
+
+  const avatarUrl = resolveUrlMaybeBackend((user as any)?.avatarUrl);
 
   const linkStyle = ({ isActive }: { isActive: boolean }) => ({
     display: "flex",
@@ -153,34 +190,124 @@ export default function Sidebar() {
       <NavLink to="/privacy" style={linkStyle}>
         <span>Privacy</span>
       </NavLink>
+    </div>
+  );
 
-      {/* mini box info utente (ripristina “sezione mood” visiva nel menu) */}
-      <div
-        style={{
-          marginTop: 6,
-          padding: 12,
-          borderRadius: 14,
-          background: "var(--tiko-bg-card)",
-          border: "1px solid #222",
+  const HeaderBlock = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      {/* Logo Clasp (deve esistere in public/icons/) */}
+      <img
+        src="/icons/clasp-icon-192.png"
+        alt="Clasp"
+        width={34}
+        height={34}
+        style={{ borderRadius: 10, display: "block" }}
+        onError={(e) => {
+          // se manca il file, evita icona rotta
+          (e.currentTarget as any).style.display = "none";
         }}
-      >
-        <div style={{ fontWeight: 900, fontSize: 13, marginBottom: 6 }}>
+      />
+
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+        <div style={{ fontWeight: 950, fontSize: 18 }}>Clasp</div>
+        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>social chat</div>
+      </div>
+    </div>
+  );
+
+  const UserBlock = (
+    <div
+      style={{
+        marginTop: 12,
+        padding: 12,
+        borderRadius: 14,
+        background: "var(--tiko-bg-card)",
+        border: "1px solid #222",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <div style={{ position: "relative", width: 44, height: 44, flexShrink: 0 }}>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt="avatar"
+            width={44}
+            height={44}
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              objectFit: "cover",
+              border: "1px solid #333",
+              display: "block",
+            }}
+            onError={(e) => {
+              // fallback se url non valida
+              (e.currentTarget as any).style.display = "none";
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              background: "#1f1f26",
+              border: "1px solid #333",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 950,
+            }}
+          >
+            {initials(user?.displayName)}
+          </div>
+        )}
+
+        {/* pallino stato */}
+        <div
+          title={stateLabel((user as any)?.state)}
+          style={{
+            position: "absolute",
+            right: -1,
+            bottom: -1,
+            width: 14,
+            height: 14,
+            borderRadius: 999,
+            background: stateColor((user as any)?.state),
+            border: "2px solid var(--tiko-bg-card)",
+          }}
+        />
+      </div>
+
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 950, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {user?.displayName || "Utente"}
         </div>
-        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-          Stato: <strong style={{ color: "var(--tiko-text)" }}>{user?.state || "—"}</strong>
+        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          @{user?.username || "—"}
         </div>
-        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 4 }}>
+
+        <div style={{ marginTop: 6, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          Stato: <strong style={{ color: "var(--tiko-text)" }}>{stateLabel((user as any)?.state)}</strong>
+        </div>
+
+        <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
           Mood: <strong style={{ color: "var(--tiko-text)" }}>{(user as any)?.mood || "—"}</strong>
-        </div>
-        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", marginTop: 8 }}>
-          Modifica stato/mood dal Profilo
         </div>
       </div>
     </div>
   );
 
-  // MOBILE: topbar + drawer
+  // MOBILE: topbar + drawer (così non schiaccia la colonna chat)
   if (isMobile) {
     return (
       <>
@@ -202,9 +329,9 @@ export default function Sidebar() {
               borderRadius: 12,
               border: "1px solid #2a2a2a",
               padding: "8px 10px",
-              background: "#ff3b30", // rosso evidenza
+              background: "#ff3b30",
               color: "#fff",
-              fontWeight: 900,
+              fontWeight: 950,
               cursor: "pointer",
             }}
             aria-label="Apri menu"
@@ -213,9 +340,19 @@ export default function Sidebar() {
             ☰
           </button>
 
-          <div style={{ fontWeight: 950, letterSpacing: 0.2 }}>Clasp</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <img
+              src="/icons/clasp-icon-192.png"
+              alt="Clasp"
+              width={26}
+              height={26}
+              style={{ borderRadius: 8, display: "block" }}
+              onError={(e) => ((e.currentTarget as any).style.display = "none")}
+            />
+            <div style={{ fontWeight: 950, letterSpacing: 0.2 }}>Clasp</div>
+          </div>
 
-          <div style={{ width: 44, display: "flex", justifyContent: "flex-end" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {pendingRequests > 0 && (
               <div
                 style={{
@@ -226,7 +363,7 @@ export default function Sidebar() {
                   background: "#ff3b30",
                   color: "#fff",
                   fontSize: 12,
-                  fontWeight: 900,
+                  fontWeight: 950,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -236,24 +373,29 @@ export default function Sidebar() {
                 {pendingRequests > 99 ? "99+" : pendingRequests}
               </div>
             )}
+
+            {/* Avatar piccolo in topbar */}
+            <div style={{ width: 28, height: 28, borderRadius: 999, overflow: "hidden", border: "1px solid #333" }}>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="avatar" width={28} height={28} style={{ width: 28, height: 28, objectFit: "cover" }} />
+              ) : (
+                <div style={{ width: 28, height: 28, background: "#1f1f26", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 950, fontSize: 12 }}>
+                  {initials(user?.displayName)}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
         {drawerOpen && (
           <div
-            style={{
-              position: "fixed",
-              inset: 0,
-              zIndex: 20000,
-              background: "rgba(0,0,0,0.55)",
-              display: "flex",
-            }}
+            style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(0,0,0,0.55)", display: "flex" }}
             onClick={() => setDrawerOpen(false)}
           >
             <div
               style={{
-                width: 320,
-                maxWidth: "85vw",
+                width: 340,
+                maxWidth: "88vw",
                 height: "100%",
                 background: "var(--tiko-bg-dark)",
                 borderRight: "1px solid #222",
@@ -263,26 +405,27 @@ export default function Sidebar() {
               }}
               onClick={(e) => e.stopPropagation()}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <div style={{ fontWeight: 950, fontSize: 18 }}>Clasp</div>
-                <button
-                  type="button"
-                  onClick={() => setDrawerOpen(false)}
-                  style={{
-                    border: "1px solid #444",
-                    background: "transparent",
-                    borderRadius: 12,
-                    padding: "8px 10px",
-                    cursor: "pointer",
-                    color: "#fff",
-                    fontWeight: 800,
-                  }}
-                >
-                  Chiudi
-                </button>
-              </div>
+              {HeaderBlock}
+              {UserBlock}
 
-              <div style={{ flex: 1, overflowY: "auto" }}>{Nav}</div>
+              <div style={{ marginTop: 12, flex: 1, overflowY: "auto" }}>{Nav}</div>
+
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                style={{
+                  marginTop: 12,
+                  border: "1px solid #444",
+                  background: "transparent",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  cursor: "pointer",
+                  color: "#fff",
+                  fontWeight: 900,
+                }}
+              >
+                Chiudi
+              </button>
             </div>
           </div>
         )}
@@ -301,7 +444,7 @@ export default function Sidebar() {
               border: "1px solid #333",
               color: "#fff",
               fontSize: 13,
-              fontWeight: 900,
+              fontWeight: 950,
             }}
           >
             {toast}
@@ -311,11 +454,11 @@ export default function Sidebar() {
     );
   }
 
-  // DESKTOP: sidebar a sinistra
+  // DESKTOP: sidebar classica (con logo + avatar in alto)
   return (
     <div
       style={{
-        width: 240,
+        width: 260,
         padding: 12,
         borderRight: "1px solid #222",
         background: "var(--tiko-bg-dark)",
@@ -323,11 +466,13 @@ export default function Sidebar() {
         flexDirection: "column",
         gap: 10,
         position: "relative",
+        overflow: "hidden",
       }}
     >
-      <div style={{ fontWeight: 950, fontSize: 18, marginBottom: 6 }}>Clasp</div>
+      {HeaderBlock}
+      {UserBlock}
 
-      <div style={{ flex: 1, overflowY: "auto" }}>{Nav}</div>
+      <div style={{ marginTop: 12, flex: 1, overflowY: "auto" }}>{Nav}</div>
 
       {toast && (
         <div
@@ -342,7 +487,7 @@ export default function Sidebar() {
             border: "1px solid #333",
             color: "#fff",
             fontSize: 13,
-            fontWeight: 900,
+            fontWeight: 950,
           }}
         >
           {toast}

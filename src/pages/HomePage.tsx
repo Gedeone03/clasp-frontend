@@ -1,36 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import Sidebar from "../components/ui/Sidebar";
-import ConversationList from "../components/ui/ConversationList";
-import ChatWindow from "../components/ui/ChatWindow";
+import { NavLink, useLocation } from "react-router-dom";
+import { API_BASE_URL } from "../../config";
+import { useAuth } from "../../AuthContext";
 
-import {
-  Conversation,
-  Message,
-  User,
-  fetchConversations,
-  fetchMessages,
-  createConversation,
-  deleteConversation,
-  sendFriendRequest,
-  fetchFriends,
-  fetchFriendRequestsSent,
-} from "../api";
-
-import { useAuth } from "../AuthContext";
-import { useChatSocket } from "../hooks/useChatSocket";
-import { API_BASE_URL } from "../config";
-import { playNotificationBeep, unlockAudio } from "../utils/notifySound";
-
-type MessageLike = Message & {
-  createdAt?: string;
-  editedAt?: string | null;
-  deletedAt?: string | null;
-  replyToId?: number | null;
-  replyTo?: any | null;
-  sender?: any | null;
-};
-
-function useIsMobile(breakpointPx = 900) {
+function useIsMobile(breakpointPx = 1200) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
@@ -40,648 +13,486 @@ function useIsMobile(breakpointPx = 900) {
   return isMobile;
 }
 
-function toTimeMs(v: any): number {
-  if (!v) return 0;
-  try {
-    const d = new Date(v);
-    return Number.isNaN(d.getTime()) ? 0 : d.getTime();
-  } catch {
-    return 0;
-  }
+const STATE_UI: Record<string, { label: string; color: string }> = {
+  DISPONIBILE: { label: "Disponibile", color: "#2ecc71" },
+  OCCUPATO: { label: "Occupato", color: "#ff3b30" },
+  ASSENTE: { label: "Assente", color: "#f39c12" },
+  OFFLINE: { label: "Offline", color: "#95a5a6" },
+  INVISIBILE: { label: "Invisibile", color: "#9b59b6" },
+  VISIBILE_A_TUTTI: { label: "Visibile a tutti", color: "#3ABEFF" },
+
+  // compatibilità (se qualche record vecchio esiste ancora)
+  ONLINE: { label: "Disponibile", color: "#2ecc71" },
+  AWAY: { label: "Assente", color: "#f39c12" },
+};
+
+function stateLabel(state?: string | null) {
+  if (!state) return "—";
+  return STATE_UI[state]?.label ?? state;
+}
+function stateColor(state?: string | null) {
+  if (!state) return "#666";
+  return STATE_UI[state]?.color ?? "#666";
 }
 
-function upsertMessage(list: MessageLike[], msg: MessageLike): MessageLike[] {
-  const idx = list.findIndex((m) => m.id === msg.id);
-  let next: MessageLike[];
-  if (idx >= 0) {
-    next = [...list];
-    next[idx] = { ...next[idx], ...msg };
-  } else {
-    next = [...list, msg];
-  }
-  next.sort((a, b) => toTimeMs((a as any).createdAt) - toTimeMs((b as any).createdAt));
-  return next;
+function initials(name?: string | null) {
+  const n = (name || "").trim();
+  if (!n) return "U";
+  const parts = n.split(/\s+/).slice(0, 2);
+  return parts.map((p) => p[0]?.toUpperCase()).join("");
 }
 
-const MOOD_OPTIONS: Array<{ value: string; label: string }> = [
-  { value: "", label: "Qualsiasi mood" },
-  { value: "FELICE", label: "Felice" },
-  { value: "TRISTE", label: "Triste" },
-  { value: "RILASSATO", label: "Rilassato" },
-  { value: "ANSIOSO", label: "Ansioso" },
-  { value: "ENTUSIASTA", label: "Entusiasta" },
-  { value: "ARRABBIATO", label: "Arrabbiato" },
-  { value: "SOLO", label: "Solo" },
-];
+function resolveUrlMaybeBackend(url?: string | null) {
+  if (!url) return "";
+  const t = url.trim();
+  if (!t) return "";
+  if (t.startsWith("http://") || t.startsWith("https://")) return t;
+  if (t.startsWith("/")) return `${API_BASE_URL.replace(/\/+$/, "")}${t}`;
+  return t;
+}
 
-export default function HomePage() {
+function Badge({ n }: { n: number }) {
+  if (!n || n <= 0) return null;
+  return (
+    <span
+      style={{
+        marginLeft: 8,
+        minWidth: 18,
+        height: 18,
+        padding: "0 6px",
+        borderRadius: 999,
+        background: "#ff3b30",
+        color: "#fff",
+        fontSize: 12,
+        fontWeight: 900,
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      title="Notifiche"
+    >
+      {n > 99 ? "99+" : n}
+    </span>
+  );
+}
+
+export default function Sidebar() {
+  const isMobile = useIsMobile(1200);
   const { user } = useAuth();
-  const isMobile = useIsMobile(900);
+  const location = useLocation();
 
   const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
-  const token = useMemo(() => localStorage.getItem("token") || "", []);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Chat state
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
-  const [messages, setMessages] = useState<MessageLike[]>([]);
-  const [typingUserId, setTypingUserId] = useState<number | null>(null);
-
-  // Mobile navigation (ripristina comportamento “come prima”)
-  const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
-  const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
-  const [mobileChatsDrawerOpen, setMobileChatsDrawerOpen] = useState(false);
-
-  // Search filters (IT + Mood ripristinato)
-  const [q, setQ] = useState("");
-  const [city, setCity] = useState("");
-  const [area, setArea] = useState("");
-  const [visibleOnly, setVisibleOnly] = useState(false);
-  const [mood, setMood] = useState("");
-
-  const [searchResults, setSearchResults] = useState<User[]>([]);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-
-  // Friends state for buttons
-  const [friendIds, setFriendIds] = useState<Set<number>>(new Set());
-  const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
-  const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
-
-  // 🔔 Notifications: unread + toast + title + sound (manteniamo tutto)
-  const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
-  const totalUnread = useMemo(
-    () => Object.values(unreadCounts).reduce((a, b) => a + (b || 0), 0),
-    [unreadCounts]
-  );
+  const [pendingRequests, setPendingRequests] = useState(0);
+  const prevPendingRef = useRef(0);
 
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
-  const [soundLocked, setSoundLocked] = useState(false);
-  const lastBeepRef = useRef<number>(0);
-
   const showToast = (msg: string) => {
     setToast(msg);
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 2800);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 3200);
   };
 
-  useEffect(() => {
-    const base = "Clasp";
-    document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base;
-  }, [totalUnread]);
-
-  useEffect(() => {
-    unlockAudio().then((ok) => setSoundLocked(!ok));
-  }, []);
-
-  async function loadConversations() {
+  const fetchPendingRequests = async () => {
     try {
-      const list = await fetchConversations();
-      setConversations(list);
-
-      // su desktop auto-seleziona (ripristina UX)
-      if (!isMobile && !selectedConversation && list.length > 0) {
-        selectConversation(list[0]);
-      }
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function loadMessages(convId: number) {
-    try {
-      const msgs = await fetchMessages(convId);
-      setMessages(msgs as any);
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  async function loadRelationships() {
-    try {
-      const [friends, sent] = await Promise.all([fetchFriends(), fetchFriendRequestsSent()]);
-      setFriendIds(new Set(friends.map((f) => f.id)));
-
-      const receiverIds = sent
-        .map((r) => r.receiver?.id)
-        .filter((id): id is number => typeof id === "number");
-      setSentRequestUserIds(new Set(receiverIds));
-    } catch (e) {
-      console.error(e);
-    }
-  }
-
-  useEffect(() => {
-    loadConversations();
-    loadRelationships();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const selectConversation = (conv: Conversation) => {
-    setSelectedConversation(conv);
-    setUnreadCounts((prev) => ({ ...prev, [conv.id]: 0 }));
-  };
-
-  const socket = useChatSocket(user ? user.id : null, {
-    onMessage: async ({ conversationId, message }) => {
-      const convId = Number(conversationId);
-
-      // aggiorna lista chat (ultima msg)
-      loadConversations();
-
-      const isMine = message?.senderId && user?.id ? message.senderId === user.id : false;
-
-      // se la chat è aperta, append e segna letta
-      if (selectedConversation?.id === convId) {
-        setMessages((prev) => upsertMessage(prev, message));
-        setUnreadCounts((prev) => ({ ...prev, [convId]: 0 }));
-      } else {
-        // increment unread + toast
-        setUnreadCounts((prev) => ({ ...prev, [convId]: (prev[convId] || 0) + 1 }));
-        const name = message?.sender?.displayName || "Qualcuno";
-        showToast(`Nuovo messaggio da ${name}`);
+      const token = localStorage.getItem("token") || "";
+      if (!token) {
+        setPendingRequests(0);
+        return;
       }
 
-      // suono solo per incoming non miei
-      if (!isMine) {
-        const now = Date.now();
-        if (now - lastBeepRef.current > 900) {
-          lastBeepRef.current = now;
-          const ok = await playNotificationBeep();
-          setSoundLocked(!ok);
-        }
-      }
-    },
-
-    onTyping: ({ conversationId, userId }) => {
-      if (Number(conversationId) !== selectedConversation?.id) return;
-      setTypingUserId(userId);
-      setTimeout(() => setTypingUserId(null), 1500);
-    },
-  });
-
-  useEffect(() => {
-    if (!selectedConversation) return;
-    socket.joinConversation(selectedConversation.id);
-    loadMessages(selectedConversation.id);
-
-    if (isMobile) setMobileScreen("chat");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedConversation?.id]);
-
-  const handleSend = (content: string) => {
-    if (!selectedConversation) return;
-    socket.sendMessage(selectedConversation.id, content, null);
-  };
-
-  const handleSendWithReply = (content: string, replyToId: number | null) => {
-    if (!selectedConversation) return;
-    socket.sendMessage(selectedConversation.id, content, replyToId ?? null);
-  };
-
-  const handleTyping = () => {
-    if (!selectedConversation) return;
-    socket.sendTyping(selectedConversation.id);
-  };
-
-  const handleDeleteConversation = async () => {
-    if (!selectedConversation) return;
-    const ok = window.confirm("Vuoi eliminare questa conversazione?");
-    if (!ok) return;
-
-    try {
-      await deleteConversation(selectedConversation.id);
-      await loadConversations();
-      setSelectedConversation(null);
-      setMessages([]);
-      if (isMobile) setMobileScreen("list");
-    } catch (e) {
-      console.error(e);
-      alert("Errore eliminazione conversazione");
-    }
-  };
-
-  async function runSearch() {
-    setSearchLoading(true);
-    setSearchError(null);
-    setFriendRequestMsg(null);
-    setSearchResults([]);
-
-    const qTrim = q.trim();
-    const cityTrim = city.trim();
-    const areaTrim = area.trim();
-
-    // evita query “vuota totale” (ma consenti visibileOnly/mood/città/zona)
-    const hasAnyFilter = !!qTrim || !!cityTrim || !!areaTrim || visibleOnly || !!mood;
-    if (!hasAnyFilter) {
-      setSearchLoading(false);
-      return;
-    }
-
-    try {
-      const params = new URLSearchParams();
-      if (qTrim) params.set("q", qTrim);
-      if (cityTrim) params.set("city", cityTrim);
-      if (areaTrim) params.set("area", areaTrim);
-      if (visibleOnly) params.set("visibleOnly", "true");
-      if (mood) params.set("mood", mood);
-
-      const r = await fetch(`${baseUrl}/users?${params.toString()}`, {
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      const r = await fetch(`${baseUrl}/friends/requests/received`, {
+        headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (!r.ok) {
-        let msg = "Errore ricerca";
-        try {
-          const data = await r.json();
-          if (data?.error) msg = data.error;
-        } catch {}
-        throw new Error(msg);
+      if (r.status === 401) {
+        setPendingRequests(0);
+        return;
       }
+      if (!r.ok) return;
 
-      const users: User[] = await r.json();
-      const filtered = users.filter((u) => u.id !== user?.id);
-      setSearchResults(filtered);
-      if (filtered.length === 0) setSearchError("Nessun utente trovato");
-    } catch (e: any) {
-      console.error(e);
-      setSearchError(e?.message || "Errore ricerca");
-    } finally {
-      setSearchLoading(false);
-    }
-  }
-
-  const startChatWithUser = async (u: User) => {
-    try {
-      const conv = await createConversation(u.id);
-      await loadConversations();
-      selectConversation(conv);
-
-      if (isMobile) {
-        setMobileTab("chats");
-        setMobileScreen("chat");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Errore creazione chat");
+      const data = await r.json();
+      const count = Array.isArray(data) ? data.length : 0;
+      setPendingRequests(count);
+    } catch {
+      // silenzioso
     }
   };
 
-  const handleSendFriendRequest = async (u: User) => {
-    try {
-      setFriendRequestMsg(null);
+  useEffect(() => {
+    fetchPendingRequests();
 
-      if (friendIds.has(u.id)) {
-        setFriendRequestMsg(`Sei già amico di @${u.username}`);
-        return;
-      }
-      if (sentRequestUserIds.has(u.id)) {
-        setFriendRequestMsg(`Hai già inviato una richiesta a @${u.username}`);
-        return;
-      }
+    const onFocus = () => fetchPendingRequests();
+    window.addEventListener("focus", onFocus);
 
-      await sendFriendRequest(u.id);
-      setSentRequestUserIds((prev) => new Set([...prev, u.id]));
-      setFriendRequestMsg(`Richiesta inviata a @${u.username}`);
-    } catch (e: any) {
-      console.error(e);
-      setFriendRequestMsg(e?.response?.data?.error || "Errore richiesta amicizia");
-    }
-  };
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === "visible") fetchPendingRequests();
+    }, 15000);
 
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      window.clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const prev = prevPendingRef.current;
+    if (pendingRequests > prev) showToast("Nuova richiesta di amicizia");
+    prevPendingRef.current = pendingRequests;
+  }, [pendingRequests]);
+
+  // chiudi drawer se cambi pagina
+  useEffect(() => {
+    if (drawerOpen) setDrawerOpen(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  const avatarUrl = resolveUrlMaybeBackend((user as any)?.avatarUrl);
+
+  const linkStyle = ({ isActive }: { isActive: boolean }) => ({
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
     padding: "10px 12px",
     borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "var(--tiko-bg-card)",
+    textDecoration: "none",
     color: "var(--tiko-text)",
-    outline: "none",
-  };
+    background: isActive ? "var(--tiko-bg-card)" : "transparent",
+    border: "1px solid #222",
+    marginBottom: 10,
+    fontWeight: 800 as const,
+  });
 
-  const SearchPanel = (
-    <div style={{ padding: 12 }}>
-      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontWeight: 900, marginBottom: 2 }}>Ricerca persone</div>
+  const Nav = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      <NavLink to="/" style={linkStyle}>
+        <span>Home</span>
+      </NavLink>
 
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            runSearch();
-          }}
-          style={{ display: "flex", flexDirection: "column", gap: 10 }}
-        >
-          <input style={inputStyle} placeholder="Nome o username" value={q} onChange={(e) => setQ(e.target.value)} />
-          <input style={inputStyle} placeholder="Città" value={city} onChange={(e) => setCity(e.target.value)} />
-          <input style={inputStyle} placeholder="Zona / Area" value={area} onChange={(e) => setArea(e.target.value)} />
+      <NavLink to="/friends" style={linkStyle}>
+        <span>Amici</span>
+        <Badge n={pendingRequests} />
+      </NavLink>
 
-          {/* ✅ MOOD ripristinato */}
-          <select style={inputStyle as any} value={mood} onChange={(e) => setMood(e.target.value)}>
-            {MOOD_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+      <NavLink to="/profile" style={linkStyle}>
+        <span>Profilo</span>
+      </NavLink>
 
-          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--tiko-text-dim)", padding: "4px 2px" }}>
-            <input type="checkbox" checked={visibleOnly} onChange={(e) => setVisibleOnly(e.target.checked)} />
-            Solo utenti “Visibile a tutti”
-          </label>
+      <NavLink to="/terms" style={linkStyle}>
+        <span>Termini</span>
+      </NavLink>
 
-          <div style={{ display: "flex", gap: 10 }}>
-            <button
-              type="button"
-              onClick={runSearch}
-              disabled={searchLoading}
-              style={{
-                flex: 1,
-                borderRadius: 12,
-                padding: "10px 12px",
-                border: "1px solid #2a2a2a",
-                background: "var(--tiko-purple)",
-                fontWeight: 900,
-                cursor: "pointer",
-              }}
-            >
-              {searchLoading ? "Ricerca..." : "Cerca"}
-            </button>
+      <NavLink to="/privacy" style={linkStyle}>
+        <span>Privacy</span>
+      </NavLink>
+    </div>
+  );
 
-            <button
-              type="button"
-              onClick={() => {
-                setQ("");
-                setCity("");
-                setArea("");
-                setVisibleOnly(false);
-                setMood("");
-                setSearchResults([]);
-                setSearchError(null);
-                setFriendRequestMsg(null);
-              }}
-              style={{
-                borderRadius: 12,
-                padding: "10px 12px",
-                border: "1px solid #2a2a2a",
-                background: "transparent",
-                cursor: "pointer",
-              }}
-            >
-              Reset
-            </button>
-          </div>
-        </form>
+  const HeaderBlock = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      {/* Logo Clasp (deve esistere in public/icons/) */}
+      <img
+        src="/icons/clasp-icon-192.png"
+        alt="Clasp"
+        width={34}
+        height={34}
+        style={{ borderRadius: 10, display: "block" }}
+        onError={(e) => {
+          // se manca il file, evita icona rotta
+          (e.currentTarget as any).style.display = "none";
+        }}
+      />
 
-        {soundLocked && (
-          <button
-            type="button"
-            onClick={async () => {
-              const ok = await unlockAudio();
-              setSoundLocked(!ok);
-              if (ok) await playNotificationBeep();
-            }}
+      <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
+        <div style={{ fontWeight: 950, fontSize: 18 }}>Clasp</div>
+        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>social chat</div>
+      </div>
+    </div>
+  );
+
+  const UserBlock = (
+    <div
+      style={{
+        marginTop: 12,
+        padding: 12,
+        borderRadius: 14,
+        background: "var(--tiko-bg-card)",
+        border: "1px solid #222",
+        display: "flex",
+        alignItems: "center",
+        gap: 12,
+      }}
+    >
+      <div style={{ position: "relative", width: 44, height: 44, flexShrink: 0 }}>
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt="avatar"
+            width={44}
+            height={44}
             style={{
-              borderRadius: 12,
-              padding: "10px 12px",
-              border: "1px solid #2a2a2a",
-              background: "transparent",
-              fontSize: 12,
-              color: "var(--tiko-text-dim)",
-              cursor: "pointer",
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              objectFit: "cover",
+              border: "1px solid #333",
+              display: "block",
+            }}
+            onError={(e) => {
+              // fallback se url non valida
+              (e.currentTarget as any).style.display = "none";
+            }}
+          />
+        ) : (
+          <div
+            style={{
+              width: 44,
+              height: 44,
+              borderRadius: 999,
+              background: "#1f1f26",
+              border: "1px solid #333",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontWeight: 950,
             }}
           >
-            Attiva suono notifiche
-          </button>
-        )}
-
-        {searchError && <div style={{ color: "red", fontSize: 13 }}>{searchError}</div>}
-        {friendRequestMsg && <div style={{ color: "var(--tiko-text-dim)", fontSize: 13 }}>{friendRequestMsg}</div>}
-
-        {searchResults.length > 0 && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {searchResults.map((u) => {
-              const isFriend = friendIds.has(u.id);
-              const isPendingSent = sentRequestUserIds.has(u.id);
-
-              return (
-                <div
-                  key={u.id}
-                  style={{
-                    padding: 10,
-                    borderRadius: 14,
-                    background: "var(--tiko-bg-card)",
-                    border: "1px solid #2a2a2a",
-                  }}
-                >
-                  <div style={{ fontSize: 13 }}>
-                    <strong>{u.displayName}</strong> <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
-                  </div>
-
-                  {(u.city || u.area) && (
-                    <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                      {[u.city, u.area].filter(Boolean).join(" • ")}
-                    </div>
-                  )}
-
-                  {(u as any)?.mood && (
-                    <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                      Mood: <strong style={{ color: "var(--tiko-text)" }}>{(u as any).mood}</strong>
-                    </div>
-                  )}
-
-                  <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                    <button type="button" onClick={() => startChatWithUser(u)} style={{ fontSize: 12, cursor: "pointer" }}>
-                      Apri chat
-                    </button>
-
-                    <button
-                      type="button"
-                      disabled={isFriend || isPendingSent}
-                      onClick={() => handleSendFriendRequest(u)}
-                      style={{
-                        fontSize: 12,
-                        background: isFriend || isPendingSent ? "#444" : "var(--tiko-mint)",
-                        color: isFriend || isPendingSent ? "#bbb" : "#000",
-                        cursor: isFriend || isPendingSent ? "not-allowed" : "pointer",
-                      }}
-                    >
-                      {isFriend ? "Già amici" : isPendingSent ? "Richiesta inviata" : "Aggiungi amico"}
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
+            {initials(user?.displayName)}
           </div>
         )}
+
+        {/* pallino stato */}
+        <div
+          title={stateLabel((user as any)?.state)}
+          style={{
+            position: "absolute",
+            right: -1,
+            bottom: -1,
+            width: 14,
+            height: 14,
+            borderRadius: 999,
+            background: stateColor((user as any)?.state),
+            border: "2px solid var(--tiko-bg-card)",
+          }}
+        />
       </div>
 
-      {/* ✅ Toast messaggi (notifiche mantenute) */}
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontWeight: 950, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          {user?.displayName || "Utente"}
+        </div>
+        <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+          @{user?.username || "—"}
+        </div>
+
+        <div style={{ marginTop: 6, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          Stato: <strong style={{ color: "var(--tiko-text)" }}>{stateLabel((user as any)?.state)}</strong>
+        </div>
+
+        <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          Mood: <strong style={{ color: "var(--tiko-text)" }}>{(user as any)?.mood || "—"}</strong>
+        </div>
+      </div>
+    </div>
+  );
+
+  // MOBILE: topbar + drawer (così non schiaccia la colonna chat)
+  if (isMobile) {
+    return (
+      <>
+        <div
+          style={{
+            height: 56,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "0 12px",
+            borderBottom: "1px solid #222",
+            background: "var(--tiko-bg-gray)",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(true)}
+            style={{
+              borderRadius: 12,
+              border: "1px solid #2a2a2a",
+              padding: "8px 10px",
+              background: "#ff3b30",
+              color: "#fff",
+              fontWeight: 950,
+              cursor: "pointer",
+            }}
+            aria-label="Apri menu"
+            title="Menu"
+          >
+            ☰
+          </button>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <img
+              src="/icons/clasp-icon-192.png"
+              alt="Clasp"
+              width={26}
+              height={26}
+              style={{ borderRadius: 8, display: "block" }}
+              onError={(e) => ((e.currentTarget as any).style.display = "none")}
+            />
+            <div style={{ fontWeight: 950, letterSpacing: 0.2 }}>Clasp</div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            {pendingRequests > 0 && (
+              <div
+                style={{
+                  minWidth: 22,
+                  height: 22,
+                  padding: "0 7px",
+                  borderRadius: 999,
+                  background: "#ff3b30",
+                  color: "#fff",
+                  fontSize: 12,
+                  fontWeight: 950,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+                title="Richieste amicizia"
+              >
+                {pendingRequests > 99 ? "99+" : pendingRequests}
+              </div>
+            )}
+
+            {/* Avatar piccolo in topbar */}
+            <div style={{ width: 28, height: 28, borderRadius: 999, overflow: "hidden", border: "1px solid #333" }}>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="avatar" width={28} height={28} style={{ width: 28, height: 28, objectFit: "cover" }} />
+              ) : (
+                <div style={{ width: 28, height: 28, background: "#1f1f26", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 950, fontSize: 12 }}>
+                  {initials(user?.displayName)}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {drawerOpen && (
+          <div
+            style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(0,0,0,0.55)", display: "flex" }}
+            onClick={() => setDrawerOpen(false)}
+          >
+            <div
+              style={{
+                width: 340,
+                maxWidth: "88vw",
+                height: "100%",
+                background: "var(--tiko-bg-dark)",
+                borderRight: "1px solid #222",
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {HeaderBlock}
+              {UserBlock}
+
+              <div style={{ marginTop: 12, flex: 1, overflowY: "auto" }}>{Nav}</div>
+
+              <button
+                type="button"
+                onClick={() => setDrawerOpen(false)}
+                style={{
+                  marginTop: 12,
+                  border: "1px solid #444",
+                  background: "transparent",
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  cursor: "pointer",
+                  color: "#fff",
+                  fontWeight: 900,
+                }}
+              >
+                Chiudi
+              </button>
+            </div>
+          </div>
+        )}
+
+        {toast && (
+          <div
+            style={{
+              position: "fixed",
+              left: 12,
+              right: 12,
+              bottom: 12,
+              zIndex: 21000,
+              padding: "10px 12px",
+              borderRadius: 14,
+              background: "rgba(0,0,0,0.85)",
+              border: "1px solid #333",
+              color: "#fff",
+              fontSize: 13,
+              fontWeight: 950,
+            }}
+          >
+            {toast}
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // DESKTOP: sidebar classica (con logo + avatar in alto)
+  return (
+    <div
+      style={{
+        width: 260,
+        padding: 12,
+        borderRight: "1px solid #222",
+        background: "var(--tiko-bg-dark)",
+        display: "flex",
+        flexDirection: "column",
+        gap: 10,
+        position: "relative",
+        overflow: "hidden",
+      }}
+    >
+      {HeaderBlock}
+      {UserBlock}
+
+      <div style={{ marginTop: 12, flex: 1, overflowY: "auto" }}>{Nav}</div>
+
       {toast && (
         <div
           style={{
-            position: "fixed",
-            top: 14,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 20000,
-            padding: "10px 14px",
+            position: "absolute",
+            left: 12,
+            right: 12,
+            bottom: 12,
+            padding: "10px 12px",
             borderRadius: 14,
             background: "rgba(0,0,0,0.85)",
             border: "1px solid #333",
             color: "#fff",
             fontSize: 13,
-            fontWeight: 900,
+            fontWeight: 950,
           }}
         >
           {toast}
         </div>
       )}
-    </div>
-  );
-
-  // Drawer chat list (mobile)
-  const MobileChatsDrawer =
-    mobileChatsDrawerOpen ? (
-      <div
-        style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.55)", display: "flex" }}
-        onClick={() => setMobileChatsDrawerOpen(false)}
-      >
-        <div
-          style={{
-            width: 320,
-            maxWidth: "90vw",
-            height: "100%",
-            background: "var(--tiko-bg-dark)",
-            borderRight: "1px solid #222",
-            boxShadow: "0 0 24px rgba(0,0,0,0.6)",
-            display: "flex",
-            flexDirection: "column",
-          }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div style={{ padding: 12, borderBottom: "1px solid #222", display: "flex", justifyContent: "space-between", alignItems: "center", background: "var(--tiko-bg-gray)" }}>
-            <strong>Chat</strong>
-            <button type="button" onClick={() => setMobileChatsDrawerOpen(false)} style={{ border: "1px solid #444", background: "transparent", borderRadius: 10, padding: "6px 10px", cursor: "pointer", color: "#fff" }}>
-              Chiudi
-            </button>
-          </div>
-
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <ConversationList
-              conversations={conversations}
-              selectedConversationId={selectedConversation?.id ?? null}
-              onSelect={(conv) => {
-                selectConversation(conv);
-                setMobileChatsDrawerOpen(false);
-              }}
-              unreadCounts={unreadCounts}
-            />
-          </div>
-        </div>
-      </div>
-    ) : null;
-
-  if (!user) return <div>Non autenticato</div>;
-
-  // ✅ MOBILE: layout in flex column (fix barra scrittura + colonna destra)
-  if (isMobile) {
-    return (
-      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--tiko-bg-dark)" }}>
-        <Sidebar />
-
-        {mobileScreen === "list" ? (
-          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
-            <div style={{ display: "flex", gap: 8, padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-gray)" }}>
-              <button
-                type="button"
-                onClick={() => setMobileTab("chats")}
-                style={{ flex: 1, background: mobileTab === "chats" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}
-              >
-                Chat {totalUnread > 0 ? `(${totalUnread})` : ""}
-              </button>
-              <button
-                type="button"
-                onClick={() => setMobileTab("search")}
-                style={{ flex: 1, background: mobileTab === "search" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}
-              >
-                Cerca
-              </button>
-            </div>
-
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
-              {mobileTab === "search" ? (
-                SearchPanel
-              ) : (
-                <ConversationList
-                  conversations={conversations}
-                  selectedConversationId={selectedConversation?.id ?? null}
-                  onSelect={(conv) => selectConversation(conv)}
-                  unreadCounts={unreadCounts}
-                />
-              )}
-            </div>
-          </div>
-        ) : (
-          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
-            {MobileChatsDrawer}
-
-            <ChatWindow
-              conversation={selectedConversation}
-              messages={messages}
-              currentUser={user}
-              typingUserId={typingUserId}
-              onSend={handleSend}
-              onSendWithReply={handleSendWithReply}
-              onTyping={handleTyping}
-              onDeleteConversation={handleDeleteConversation}
-              onOpenChats={() => setMobileChatsDrawerOpen(true)}
-              onBack={() => {
-                setMobileTab("chats");
-                setMobileScreen("list");
-              }}
-            />
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  // ✅ WEB: layout stabile, chat sempre visibile, barra scrittura OK
-  return (
-    <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
-      <Sidebar />
-
-      <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
-        <div style={{ width: 380, borderRight: "1px solid #222", display: "flex", flexDirection: "column", minWidth: 0, background: "var(--tiko-bg-gray)" }}>
-          <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>{SearchPanel}</div>
-
-          <div style={{ height: 1, background: "#222" }} />
-
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <ConversationList
-              conversations={conversations}
-              selectedConversationId={selectedConversation?.id ?? null}
-              onSelect={(conv) => selectConversation(conv)}
-              unreadCounts={unreadCounts}
-            />
-          </div>
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <ChatWindow
-            conversation={selectedConversation}
-            messages={messages}
-            currentUser={user}
-            typingUserId={typingUserId}
-            onSend={handleSend}
-            onSendWithReply={handleSendWithReply}
-            onTyping={handleTyping}
-            onDeleteConversation={handleDeleteConversation}
-          />
-        </div>
-      </div>
     </div>
   );
 }
