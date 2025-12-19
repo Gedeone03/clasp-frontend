@@ -3,14 +3,61 @@ import { NavLink, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../../config";
 import { useAuth } from "../../AuthContext";
 
-function useIsMobile(breakpointPx = 1200) {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
+function useIsMobile(breakpointPx = 1100) {
+  const compute = () => {
+    const coarse =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
+    return coarse || window.innerWidth < breakpointPx;
+  };
+
+  const [isMobile, setIsMobile] = useState(compute);
+
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
+    const onResize = () => setIsMobile(compute());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
-  }, [breakpointPx]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return isMobile;
+}
+
+function ClaspLogo({ size = 34 }: { size?: number }) {
+  // SVG IDENTICO a quello che mi hai inviato (solo scalato)
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 512 512"
+      xmlns="http://www.w3.org/2000/svg"
+      style={{ display: "block" }}
+      aria-label="Clasp"
+      role="img"
+    >
+      <circle cx="256" cy="256" r="240" fill="#121218" />
+      <path
+        d="
+          M 344 172
+          Q 304 132 244 132
+          Q 150 132 150 256
+          Q 150 380 244 380
+          Q 304 380 344 340
+          A 26 26 0 0 0 342 300
+          Q 326 284 308 300
+          Q 284 324 244 324
+          Q 192 324 192 256
+          Q 192 188 244 188
+          Q 284 188 308 212
+          Q 326 228 342 212
+          A 26 26 0 0 0 344 172
+        "
+        fill="#7A29FF"
+      />
+      <circle cx="344" cy="214" r="26" fill="#3ABEFF" />
+    </svg>
+  );
 }
 
 const STATE_UI: Record<string, { label: string; color: string }> = {
@@ -21,7 +68,7 @@ const STATE_UI: Record<string, { label: string; color: string }> = {
   INVISIBILE: { label: "Invisibile", color: "#9b59b6" },
   VISIBILE_A_TUTTI: { label: "Visibile a tutti", color: "#3ABEFF" },
 
-  // compatibilità (se qualche record vecchio esiste ancora)
+  // compatibilità eventuale vecchia enum
   ONLINE: { label: "Disponibile", color: "#2ecc71" },
   AWAY: { label: "Assente", color: "#f39c12" },
 };
@@ -77,16 +124,16 @@ function Badge({ n }: { n: number }) {
 }
 
 export default function Sidebar() {
-  const isMobile = useIsMobile(1200);
+  const isMobile = useIsMobile(1100);
   const { user } = useAuth();
   const location = useLocation();
 
   const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
+  // friend requests badge + toast
   const [pendingRequests, setPendingRequests] = useState(0);
   const prevPendingRef = useRef(0);
-
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
@@ -145,7 +192,7 @@ export default function Sidebar() {
     prevPendingRef.current = pendingRequests;
   }, [pendingRequests]);
 
-  // chiudi drawer se cambi pagina
+  // chiudi drawer quando cambi pagina
   useEffect(() => {
     if (drawerOpen) setDrawerOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -168,52 +215,11 @@ export default function Sidebar() {
     fontWeight: 800 as const,
   });
 
-  const Nav = (
-    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-      <NavLink to="/" style={linkStyle}>
-        <span>Home</span>
-      </NavLink>
-
-      <NavLink to="/friends" style={linkStyle}>
-        <span>Amici</span>
-        <Badge n={pendingRequests} />
-      </NavLink>
-
-      <NavLink to="/profile" style={linkStyle}>
-        <span>Profilo</span>
-      </NavLink>
-
-      <NavLink to="/terms" style={linkStyle}>
-        <span>Termini</span>
-      </NavLink>
-
-      <NavLink to="/privacy" style={linkStyle}>
-        <span>Privacy</span>
-      </NavLink>
-    </div>
-  );
-
   const HeaderBlock = (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 10,
-      }}
-    >
-      {/* Logo Clasp (deve esistere in public/icons/) */}
-      <img
-        src="/icons/clasp-icon-192.png"
-        alt="Clasp"
-        width={34}
-        height={34}
-        style={{ borderRadius: 10, display: "block" }}
-        onError={(e) => {
-          // se manca il file, evita icona rotta
-          (e.currentTarget as any).style.display = "none";
-        }}
-      />
-
+    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+      <div style={{ width: 34, height: 34, borderRadius: 12, overflow: "hidden" }}>
+        <ClaspLogo size={34} />
+      </div>
       <div style={{ display: "flex", flexDirection: "column", lineHeight: 1.1 }}>
         <div style={{ fontWeight: 950, fontSize: 18 }}>Clasp</div>
         <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>social chat</div>
@@ -250,7 +256,6 @@ export default function Sidebar() {
               display: "block",
             }}
             onError={(e) => {
-              // fallback se url non valida
               (e.currentTarget as any).style.display = "none";
             }}
           />
@@ -272,7 +277,6 @@ export default function Sidebar() {
           </div>
         )}
 
-        {/* pallino stato */}
         <div
           title={stateLabel((user as any)?.state)}
           style={{
@@ -299,7 +303,6 @@ export default function Sidebar() {
         <div style={{ marginTop: 6, fontSize: 12, color: "var(--tiko-text-dim)" }}>
           Stato: <strong style={{ color: "var(--tiko-text)" }}>{stateLabel((user as any)?.state)}</strong>
         </div>
-
         <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
           Mood: <strong style={{ color: "var(--tiko-text)" }}>{(user as any)?.mood || "—"}</strong>
         </div>
@@ -307,7 +310,32 @@ export default function Sidebar() {
     </div>
   );
 
-  // MOBILE: topbar + drawer (così non schiaccia la colonna chat)
+  const Nav = (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
+      <NavLink to="/" style={linkStyle}>
+        <span>Home</span>
+      </NavLink>
+
+      <NavLink to="/friends" style={linkStyle}>
+        <span>Amici</span>
+        <Badge n={pendingRequests} />
+      </NavLink>
+
+      <NavLink to="/profile" style={linkStyle}>
+        <span>Profilo</span>
+      </NavLink>
+
+      <NavLink to="/terms" style={linkStyle}>
+        <span>Termini</span>
+      </NavLink>
+
+      <NavLink to="/privacy" style={linkStyle}>
+        <span>Privacy</span>
+      </NavLink>
+    </div>
+  );
+
+  // MOBILE: topbar + drawer (non schiaccia mai la chat)
   if (isMobile) {
     return (
       <>
@@ -341,14 +369,9 @@ export default function Sidebar() {
           </button>
 
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <img
-              src="/icons/clasp-icon-192.png"
-              alt="Clasp"
-              width={26}
-              height={26}
-              style={{ borderRadius: 8, display: "block" }}
-              onError={(e) => ((e.currentTarget as any).style.display = "none")}
-            />
+            <div style={{ width: 26, height: 26, borderRadius: 10, overflow: "hidden" }}>
+              <ClaspLogo size={26} />
+            </div>
             <div style={{ fontWeight: 950, letterSpacing: 0.2 }}>Clasp</div>
           </div>
 
@@ -374,7 +397,6 @@ export default function Sidebar() {
               </div>
             )}
 
-            {/* Avatar piccolo in topbar */}
             <div style={{ width: 28, height: 28, borderRadius: 999, overflow: "hidden", border: "1px solid #333" }}>
               {avatarUrl ? (
                 <img src={avatarUrl} alt="avatar" width={28} height={28} style={{ width: 28, height: 28, objectFit: "cover" }} />
@@ -388,10 +410,7 @@ export default function Sidebar() {
         </div>
 
         {drawerOpen && (
-          <div
-            style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(0,0,0,0.55)", display: "flex" }}
-            onClick={() => setDrawerOpen(false)}
-          >
+          <div style={{ position: "fixed", inset: 0, zIndex: 20000, background: "rgba(0,0,0,0.55)", display: "flex" }} onClick={() => setDrawerOpen(false)}>
             <div
               style={{
                 width: 340,
@@ -407,8 +426,7 @@ export default function Sidebar() {
             >
               {HeaderBlock}
               {UserBlock}
-
-              <div style={{ marginTop: 12, flex: 1, overflowY: "auto" }}>{Nav}</div>
+              <div style={{ flex: 1, overflowY: "auto" }}>{Nav}</div>
 
               <button
                 type="button"
@@ -454,7 +472,7 @@ export default function Sidebar() {
     );
   }
 
-  // DESKTOP: sidebar classica (con logo + avatar in alto)
+  // DESKTOP
   return (
     <div
       style={{
@@ -472,7 +490,7 @@ export default function Sidebar() {
       {HeaderBlock}
       {UserBlock}
 
-      <div style={{ marginTop: 12, flex: 1, overflowY: "auto" }}>{Nav}</div>
+      <div style={{ flex: 1, overflowY: "auto" }}>{Nav}</div>
 
       {toast && (
         <div
