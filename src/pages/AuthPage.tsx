@@ -5,6 +5,11 @@ import { useAuth } from "../AuthContext";
 type Mode = "login" | "register";
 
 export default function AuthPage() {
+  // Marker visibile: se non lo vedi sul sito live, Netlify non sta servendo la tua versione
+  const BUILD_MARKER = "AUTH FIX BUILD: 2025-12-19-01";
+
+  console.log(BUILD_MARKER);
+
   const nav = useNavigate();
   const { login, register } = useAuth();
 
@@ -21,48 +26,55 @@ export default function AuthPage() {
   const [termsAccepted, setTermsAccepted] = useState(false);
 
   const [loading, setLoading] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const resetMessages = () => {
-    setMsg(null);
-    setErr(null);
+  const resetMsgs = () => {
+    setStatus(null);
+    setError(null);
   };
 
-  const onSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    resetMessages();
-
+  const doLogin = async () => {
+    resetMsgs();
     try {
       setLoading(true);
+      setStatus("Invio login...");
+      const id = identifier.trim();
+      const pw = password;
 
-      if (mode === "login") {
-        const id = identifier.trim();
-        const pw = password;
-
-        if (!id || !pw) {
-          setErr("Inserisci email/username e password.");
-          return;
-        }
-
-        await login(id, pw);
-        setMsg("Login effettuato.");
-        nav("/", { replace: true });
+      if (!id || !pw) {
+        setError("Inserisci email/username e password.");
         return;
       }
 
-      // REGISTER
+      await login(id, pw);
+      setStatus("Login OK. Reindirizzamento...");
+      nav("/", { replace: true });
+    } catch (e: any) {
+      setError(String(e?.message || "Errore durante il login."));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const doRegister = async () => {
+    resetMsgs();
+    try {
+      setLoading(true);
+      setStatus("Invio registrazione...");
+
       const em = email.trim();
       const un = username.trim();
       const dn = displayName.trim();
       const pw = password;
 
       if (!em || !un || !dn || !pw) {
-        setErr("Compila tutti i campi obbligatori.");
+        setError("Compila tutti i campi obbligatori.");
         return;
       }
+
       if (!termsAccepted) {
-        setErr("Devi accettare i Termini e le Condizioni.");
+        setError("Devi accettare i Termini e la Privacy.");
         return;
       }
 
@@ -74,14 +86,30 @@ export default function AuthPage() {
         termsAccepted,
       });
 
-      setMsg("Registrazione completata.");
+      setStatus("Registrazione OK. Reindirizzamento...");
       nav("/", { replace: true });
     } catch (e: any) {
-      const text = String(e?.message || "Errore durante la richiesta.");
-      setErr(text);
+      setError(String(e?.message || "Errore durante la registrazione."));
     } finally {
       setLoading(false);
     }
+  };
+
+  // Forza l’azione anche se submit non scatta
+  const onPrimaryClick = async (e: React.MouseEvent) => {
+    e.preventDefault();
+    if (loading) return;
+
+    if (mode === "login") await doLogin();
+    else await doRegister();
+  };
+
+  const inputStyle: React.CSSProperties = {
+    padding: "10px 12px",
+    borderRadius: 12,
+    border: "1px solid #2a2a2a",
+    background: "var(--tiko-bg-dark)",
+    color: "var(--tiko-text)",
   };
 
   return (
@@ -97,18 +125,22 @@ export default function AuthPage() {
     >
       <div
         style={{
-          width: "min(460px, 100%)",
+          width: "min(520px, 100%)",
           background: "var(--tiko-bg-card)",
           border: "1px solid #222",
           borderRadius: 16,
           padding: 16,
         }}
       >
+        <div style={{ fontSize: 12, color: "yellow", marginBottom: 10, fontWeight: 900 }}>
+          {BUILD_MARKER}
+        </div>
+
         <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
           <button
             type="button"
             onClick={() => {
-              resetMessages();
+              resetMsgs();
               setMode("login");
             }}
             style={{
@@ -127,7 +159,7 @@ export default function AuthPage() {
           <button
             type="button"
             onClick={() => {
-              resetMessages();
+              resetMsgs();
               setMode("register");
             }}
             style={{
@@ -144,33 +176,31 @@ export default function AuthPage() {
           </button>
         </div>
 
-        <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {/* FORM */}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (mode === "login") void doLogin();
+            else void doRegister();
+          }}
+          style={{ display: "flex", flexDirection: "column", gap: 10 }}
+        >
           {mode === "login" ? (
             <>
               <input
                 placeholder="Email o username"
                 value={identifier}
                 onChange={(e) => setIdentifier(e.target.value)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #2a2a2a",
-                  background: "var(--tiko-bg-dark)",
-                  color: "var(--tiko-text)",
-                }}
+                style={inputStyle}
+                autoComplete="username"
               />
               <input
                 placeholder="Password"
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #2a2a2a",
-                  background: "var(--tiko-bg-dark)",
-                  color: "var(--tiko-text)",
-                }}
+                style={inputStyle}
+                autoComplete="current-password"
               />
             </>
           ) : (
@@ -179,39 +209,24 @@ export default function AuthPage() {
                 placeholder="Email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #2a2a2a",
-                  background: "var(--tiko-bg-dark)",
-                  color: "var(--tiko-text)",
-                }}
+                style={inputStyle}
+                autoComplete="email"
               />
 
               <input
                 placeholder="Username"
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #2a2a2a",
-                  background: "var(--tiko-bg-dark)",
-                  color: "var(--tiko-text)",
-                }}
+                style={inputStyle}
+                autoComplete="username"
               />
 
               <input
                 placeholder="Nome visualizzato"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #2a2a2a",
-                  background: "var(--tiko-bg-dark)",
-                  color: "var(--tiko-text)",
-                }}
+                style={inputStyle}
+                autoComplete="name"
               />
 
               <input
@@ -219,13 +234,8 @@ export default function AuthPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={{
-                  padding: "10px 12px",
-                  borderRadius: 12,
-                  border: "1px solid #2a2a2a",
-                  background: "var(--tiko-bg-dark)",
-                  color: "var(--tiko-text)",
-                }}
+                style={inputStyle}
+                autoComplete="new-password"
               />
 
               <label style={{ fontSize: 13, color: "var(--tiko-text-dim)" }}>
@@ -241,7 +251,8 @@ export default function AuthPage() {
           )}
 
           <button
-            type="submit"
+            type="button"
+            onClick={onPrimaryClick}
             disabled={loading}
             style={{
               padding: "10px 12px",
@@ -257,17 +268,23 @@ export default function AuthPage() {
             {loading ? "Invio..." : mode === "login" ? "Entra" : "Crea account"}
           </button>
 
-          {err && (
-            <div style={{ marginTop: 6, color: "#ff6b6b", fontWeight: 800, fontSize: 13 }}>
-              {err}
+          {/* Stato/Errore sempre visibili */}
+          {status && (
+            <div style={{ marginTop: 6, color: "var(--tiko-text-dim)", fontWeight: 900, fontSize: 13 }}>
+              {status}
             </div>
           )}
-          {msg && (
-            <div style={{ marginTop: 6, color: "var(--tiko-text-dim)", fontWeight: 800, fontSize: 13 }}>
-              {msg}
+
+          {error && (
+            <div style={{ marginTop: 6, color: "#ff6b6b", fontWeight: 950, fontSize: 13 }}>
+              ERRORE: {error}
             </div>
           )}
         </form>
+
+        <div style={{ marginTop: 14, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          Se la scritta gialla non cambia dopo il deploy, stai vedendo una versione in cache.
+        </div>
       </div>
     </div>
   );
