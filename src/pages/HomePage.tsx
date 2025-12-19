@@ -30,7 +30,7 @@ type MessageLike = Message & {
   sender?: any | null;
 };
 
-function useIsMobile(breakpointPx: number = 900) {
+function useIsMobile(breakpointPx = 900) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
   useEffect(() => {
     const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
@@ -63,58 +63,71 @@ function upsertMessage(list: MessageLike[], msg: MessageLike): MessageLike[] {
   return next;
 }
 
+const MOOD_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: "", label: "Qualsiasi mood" },
+  { value: "FELICE", label: "Felice" },
+  { value: "TRISTE", label: "Triste" },
+  { value: "RILASSATO", label: "Rilassato" },
+  { value: "ANSIOSO", label: "Ansioso" },
+  { value: "ENTUSIASTA", label: "Entusiasta" },
+  { value: "ARRABBIATO", label: "Arrabbiato" },
+  { value: "SOLO", label: "Solo" },
+];
+
 export default function HomePage() {
   const { user } = useAuth();
   const isMobile = useIsMobile(900);
-  const baseUrl = API_BASE_URL.replace(/\/+$/, "");
 
+  const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
+  const token = useMemo(() => localStorage.getItem("token") || "", []);
+
+  // Chat state
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<MessageLike[]>([]);
   const [typingUserId, setTypingUserId] = useState<number | null>(null);
 
-  // Mobile nav
+  // Mobile navigation (ripristina comportamento “come prima”)
   const [mobileScreen, setMobileScreen] = useState<"list" | "chat">("list");
   const [mobileTab, setMobileTab] = useState<"chats" | "search">("chats");
   const [mobileChatsDrawerOpen, setMobileChatsDrawerOpen] = useState(false);
 
-  // Search filters (IT)
+  // Search filters (IT + Mood ripristinato)
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
   const [visibleOnly, setVisibleOnly] = useState(false);
+  const [mood, setMood] = useState("");
 
   const [searchResults, setSearchResults] = useState<User[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
 
-  // Friends buttons
+  // Friends state for buttons
   const [friendIds, setFriendIds] = useState<Set<number>>(new Set());
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
   const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
 
-  // 🔔 Sound + toast
-  const [soundLocked, setSoundLocked] = useState(false);
-  const lastBeepRef = useRef<number>(0);
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimerRef = useRef<number | null>(null);
-
-  // 🔴 Unread messages
+  // 🔔 Notifications: unread + toast + title + sound (manteniamo tutto)
   const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
-
   const totalUnread = useMemo(
     () => Object.values(unreadCounts).reduce((a, b) => a + (b || 0), 0),
     [unreadCounts]
   );
 
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const [soundLocked, setSoundLocked] = useState(false);
+  const lastBeepRef = useRef<number>(0);
+
   const showToast = (msg: string) => {
     setToast(msg);
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 3000);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2800);
   };
 
   useEffect(() => {
-    // Tab title notification
     const base = "Clasp";
     document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base;
   }, [totalUnread]);
@@ -128,6 +141,7 @@ export default function HomePage() {
       const list = await fetchConversations();
       setConversations(list);
 
+      // su desktop auto-seleziona (ripristina UX)
       if (!isMobile && !selectedConversation && list.length > 0) {
         selectConversation(list[0]);
       }
@@ -165,17 +179,23 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const selectConversation = (conv: Conversation) => {
+    setSelectedConversation(conv);
+    setUnreadCounts((prev) => ({ ...prev, [conv.id]: 0 }));
+  };
+
   const socket = useChatSocket(user ? user.id : null, {
     onMessage: async ({ conversationId, message }) => {
+      const convId = Number(conversationId);
+
+      // aggiorna lista chat (ultima msg)
       loadConversations();
 
-      const convId = Number(conversationId);
       const isMine = message?.senderId && user?.id ? message.senderId === user.id : false;
 
-      // append to current chat if open
+      // se la chat è aperta, append e segna letta
       if (selectedConversation?.id === convId) {
         setMessages((prev) => upsertMessage(prev, message));
-        // if user is in the chat, mark as read
         setUnreadCounts((prev) => ({ ...prev, [convId]: 0 }));
       } else {
         // increment unread + toast
@@ -184,7 +204,7 @@ export default function HomePage() {
         showToast(`Nuovo messaggio da ${name}`);
       }
 
-      // sound for incoming (not mine)
+      // suono solo per incoming non miei
       if (!isMine) {
         const now = Date.now();
         if (now - lastBeepRef.current > 900) {
@@ -206,6 +226,7 @@ export default function HomePage() {
     if (!selectedConversation) return;
     socket.joinConversation(selectedConversation.id);
     loadMessages(selectedConversation.id);
+
     if (isMobile) setMobileScreen("chat");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversation?.id]);
@@ -242,11 +263,6 @@ export default function HomePage() {
     }
   };
 
-  const selectConversation = (conv: Conversation) => {
-    setSelectedConversation(conv);
-    setUnreadCounts((prev) => ({ ...prev, [conv.id]: 0 }));
-  };
-
   async function runSearch() {
     setSearchLoading(true);
     setSearchError(null);
@@ -257,7 +273,8 @@ export default function HomePage() {
     const cityTrim = city.trim();
     const areaTrim = area.trim();
 
-    const hasAnyFilter = !!qTrim || !!cityTrim || !!areaTrim || visibleOnly;
+    // evita query “vuota totale” (ma consenti visibileOnly/mood/città/zona)
+    const hasAnyFilter = !!qTrim || !!cityTrim || !!areaTrim || visibleOnly || !!mood;
     if (!hasAnyFilter) {
       setSearchLoading(false);
       return;
@@ -269,8 +286,8 @@ export default function HomePage() {
       if (cityTrim) params.set("city", cityTrim);
       if (areaTrim) params.set("area", areaTrim);
       if (visibleOnly) params.set("visibleOnly", "true");
+      if (mood) params.set("mood", mood);
 
-      const token = localStorage.getItem("token") || "";
       const r = await fetch(`${baseUrl}/users?${params.toString()}`, {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
@@ -301,6 +318,7 @@ export default function HomePage() {
       const conv = await createConversation(u.id);
       await loadConversations();
       selectConversation(conv);
+
       if (isMobile) {
         setMobileTab("chats");
         setMobileScreen("chat");
@@ -346,7 +364,7 @@ export default function HomePage() {
   const SearchPanel = (
     <div style={{ padding: 12 }}>
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-        <div style={{ fontWeight: 800, marginBottom: 4 }}>Ricerca persone</div>
+        <div style={{ fontWeight: 900, marginBottom: 2 }}>Ricerca persone</div>
 
         <form
           onSubmit={(e) => {
@@ -359,7 +377,16 @@ export default function HomePage() {
           <input style={inputStyle} placeholder="Città" value={city} onChange={(e) => setCity(e.target.value)} />
           <input style={inputStyle} placeholder="Zona / Area" value={area} onChange={(e) => setArea(e.target.value)} />
 
-          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--tiko-text-dim)", padding: "6px 2px" }}>
+          {/* ✅ MOOD ripristinato */}
+          <select style={inputStyle as any} value={mood} onChange={(e) => setMood(e.target.value)}>
+            {MOOD_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+
+          <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--tiko-text-dim)", padding: "4px 2px" }}>
             <input type="checkbox" checked={visibleOnly} onChange={(e) => setVisibleOnly(e.target.checked)} />
             Solo utenti “Visibile a tutti”
           </label>
@@ -375,7 +402,8 @@ export default function HomePage() {
                 padding: "10px 12px",
                 border: "1px solid #2a2a2a",
                 background: "var(--tiko-purple)",
-                fontWeight: 800,
+                fontWeight: 900,
+                cursor: "pointer",
               }}
             >
               {searchLoading ? "Ricerca..." : "Cerca"}
@@ -388,6 +416,7 @@ export default function HomePage() {
                 setCity("");
                 setArea("");
                 setVisibleOnly(false);
+                setMood("");
                 setSearchResults([]);
                 setSearchError(null);
                 setFriendRequestMsg(null);
@@ -397,6 +426,7 @@ export default function HomePage() {
                 padding: "10px 12px",
                 border: "1px solid #2a2a2a",
                 background: "transparent",
+                cursor: "pointer",
               }}
             >
               Reset
@@ -419,6 +449,7 @@ export default function HomePage() {
               background: "transparent",
               fontSize: 12,
               color: "var(--tiko-text-dim)",
+              cursor: "pointer",
             }}
           >
             Attiva suono notifiche
@@ -454,8 +485,14 @@ export default function HomePage() {
                     </div>
                   )}
 
+                  {(u as any)?.mood && (
+                    <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                      Mood: <strong style={{ color: "var(--tiko-text)" }}>{(u as any).mood}</strong>
+                    </div>
+                  )}
+
                   <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-                    <button type="button" onClick={() => startChatWithUser(u)} style={{ fontSize: 12 }}>
+                    <button type="button" onClick={() => startChatWithUser(u)} style={{ fontSize: 12, cursor: "pointer" }}>
                       Apri chat
                     </button>
 
@@ -480,7 +517,7 @@ export default function HomePage() {
         )}
       </div>
 
-      {/* Toast (nuovi messaggi) */}
+      {/* ✅ Toast messaggi (notifiche mantenute) */}
       {toast && (
         <div
           style={{
@@ -495,7 +532,7 @@ export default function HomePage() {
             border: "1px solid #333",
             color: "#fff",
             fontSize: 13,
-            fontWeight: 800,
+            fontWeight: 900,
           }}
         >
           {toast}
@@ -504,20 +541,13 @@ export default function HomePage() {
     </div>
   );
 
-  const ChatsPanel = (
-    <div style={{ flex: 1, minHeight: 0 }}>
-      <ConversationList
-        conversations={conversations}
-        selectedConversationId={selectedConversation?.id ?? null}
-        onSelect={(conv) => selectConversation(conv)}
-        unreadCounts={unreadCounts}
-      />
-    </div>
-  );
-
+  // Drawer chat list (mobile)
   const MobileChatsDrawer =
     mobileChatsDrawerOpen ? (
-      <div style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.55)", display: "flex" }} onClick={() => setMobileChatsDrawerOpen(false)}>
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 12000, background: "rgba(0,0,0,0.55)", display: "flex" }}
+        onClick={() => setMobileChatsDrawerOpen(false)}
+      >
         <div
           style={{
             width: 320,
@@ -555,27 +585,46 @@ export default function HomePage() {
 
   if (!user) return <div>Non autenticato</div>;
 
-  // MOBILE
+  // ✅ MOBILE: layout in flex column (fix barra scrittura + colonna destra)
   if (isMobile) {
     return (
-      <div style={{ height: "100vh", background: "var(--tiko-bg-dark)" }}>
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
 
         {mobileScreen === "list" ? (
-          <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minHeight: 0, display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", gap: 8, padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-gray)" }}>
-              <button type="button" onClick={() => setMobileTab("chats")} style={{ flex: 1, background: mobileTab === "chats" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}>
+              <button
+                type="button"
+                onClick={() => setMobileTab("chats")}
+                style={{ flex: 1, background: mobileTab === "chats" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}
+              >
                 Chat {totalUnread > 0 ? `(${totalUnread})` : ""}
               </button>
-              <button type="button" onClick={() => setMobileTab("search")} style={{ flex: 1, background: mobileTab === "search" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}>
+              <button
+                type="button"
+                onClick={() => setMobileTab("search")}
+                style={{ flex: 1, background: mobileTab === "search" ? "var(--tiko-purple)" : "var(--tiko-bg-card)" }}
+              >
                 Cerca
               </button>
             </div>
 
-            <div style={{ flex: 1, overflowY: "auto" }}>{mobileTab === "search" ? SearchPanel : ChatsPanel}</div>
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+              {mobileTab === "search" ? (
+                SearchPanel
+              ) : (
+                <ConversationList
+                  conversations={conversations}
+                  selectedConversationId={selectedConversation?.id ?? null}
+                  onSelect={(conv) => selectConversation(conv)}
+                  unreadCounts={unreadCounts}
+                />
+              )}
+            </div>
           </div>
         ) : (
-          <div style={{ height: "100vh", position: "relative" }}>
+          <div style={{ flex: 1, minHeight: 0, position: "relative" }}>
             {MobileChatsDrawer}
 
             <ChatWindow
@@ -599,14 +648,16 @@ export default function HomePage() {
     );
   }
 
-  // WEB
+  // ✅ WEB: layout stabile, chat sempre visibile, barra scrittura OK
   return (
-    <div style={{ height: "100vh", display: "flex", overflow: "hidden" }}>
+    <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
 
-      <div style={{ flex: 1, display: "flex", minWidth: 0 }}>
-        <div style={{ width: 360, borderRight: "1px solid #222", display: "flex", flexDirection: "column", background: "var(--tiko-bg-gray)", minWidth: 0 }}>
-          <div style={{ borderBottom: "1px solid #222" }}>{SearchPanel}</div>
+      <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
+        <div style={{ width: 380, borderRight: "1px solid #222", display: "flex", flexDirection: "column", minWidth: 0, background: "var(--tiko-bg-gray)" }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>{SearchPanel}</div>
+
+          <div style={{ height: 1, background: "#222" }} />
 
           <div style={{ flex: 1, minHeight: 0 }}>
             <ConversationList
@@ -618,7 +669,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <ChatWindow
             conversation={selectedConversation}
             messages={messages}
