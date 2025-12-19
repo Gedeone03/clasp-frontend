@@ -1,115 +1,78 @@
-// src/main.tsx
-
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-
-import { AuthProvider, useAuth } from "./AuthContext";
-import { LanguageProvider } from "./LanguageContext";
-
-import AuthPage from "./pages/AuthPage";
-import HomePage from "./pages/HomePage";
-import FriendsPage from "./pages/FriendsPage";
-import ProfilePage from "./pages/ProfilePage";
-import TermsPage from "./pages/TermsPage";
-import PrivacyPage from "./pages/PrivacyPage";
-import SettingsPage from "./pages/SettingsPage";
-import MoodConnectPage from "./pages/MoodConnectPage";
-
 import "./index.css";
 
-const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, loading } = useAuth();
+import { AuthProvider } from "./AuthContext";
 
-  if (loading) {
-    return (
-      <div style={{ padding: 20 }}>
-        <h2 style={{ color: "var(--tiko-blue)" }}>Loading…</h2>
-      </div>
-    );
-  }
+import HomePage from "./pages/HomePage";
+import AuthPage from "./pages/AuthPage";
+import FriendsPage from "./pages/FriendsPage";
+import ProfilePage from "./pages/ProfilePage";
+import SettingsPage from "./pages/SettingsPage";
+import TermsPage from "./pages/TermsPage";
+import PrivacyPage from "./pages/PrivacyPage";
 
-  if (!user) {
-    return <Navigate to="/auth" replace />;
-  }
+function RequireAuth({ children }: { children: JSX.Element }) {
+  const token = localStorage.getItem("token");
+  return token ? children : <Navigate to="/auth" replace />;
+}
 
-  return <>{children}</>;
-};
-
-const App: React.FC = () => {
+function App() {
   return (
     <Routes>
       <Route
         path="/"
         element={
-          <ProtectedRoute>
+          <RequireAuth>
             <HomePage />
-          </ProtectedRoute>
+          </RequireAuth>
         }
       />
 
       <Route path="/auth" element={<AuthPage />} />
 
-      <Route path="/terms" element={<TermsPage />} />
-      <Route path="/privacy" element={<PrivacyPage />} />
-
       <Route
         path="/friends"
         element={
-          <ProtectedRoute>
+          <RequireAuth>
             <FriendsPage />
-          </ProtectedRoute>
+          </RequireAuth>
         }
       />
 
       <Route
         path="/profile"
         element={
-          <ProtectedRoute>
+          <RequireAuth>
             <ProfilePage />
-          </ProtectedRoute>
-        }
-      />
-
-      <Route
-        path="/mood"
-        element={
-          <ProtectedRoute>
-            <MoodConnectPage />
-          </ProtectedRoute>
+          </RequireAuth>
         }
       />
 
       <Route
         path="/settings"
         element={
-          <ProtectedRoute>
+          <RequireAuth>
             <SettingsPage />
-          </ProtectedRoute>
+          </RequireAuth>
         }
       />
+
+      <Route path="/terms" element={<TermsPage />} />
+      <Route path="/privacy" element={<PrivacyPage />} />
 
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
-};
+}
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
-    <LanguageProvider>
+    <BrowserRouter>
       <AuthProvider>
-        <BrowserRouter>
-          <App />
-        </BrowserRouter>
+        <App />
       </AuthProvider>
-    </LanguageProvider>
+    </BrowserRouter>
   </React.StrictMode>
 );
-// PWA: register service worker
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker
-      .register("/service-worker.js")
-      .catch((err) => console.error("SW registration failed", err));
-  });
-}

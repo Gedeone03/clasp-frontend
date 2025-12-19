@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, NavLink, useLocation } from "react-router-dom";
 import { API_BASE_URL } from "../../config";
 import { useAuth } from "../../AuthContext";
@@ -31,15 +31,7 @@ function useIsMobile(breakpointPx = 1100) {
 
 function ClaspLogo({ size = 34 }: { size?: number }) {
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 512 512"
-      xmlns="http://www.w3.org/2000/svg"
-      style={{ display: "block" }}
-      aria-label="Clasp"
-      role="img"
-    >
+    <svg width={size} height={size} viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" style={{ display: "block" }}>
       <circle cx="256" cy="256" r="240" fill="#121218" />
       <path
         d="
@@ -71,7 +63,6 @@ const STATE_UI: Record<string, { label: string; color: string }> = {
   OFFLINE: { label: "Offline", color: "#95a5a6" },
   INVISIBILE: { label: "Invisibile", color: "#9b59b6" },
   VISIBILE_A_TUTTI: { label: "Visibile a tutti", color: "#3ABEFF" },
-
   ONLINE: { label: "Disponibile", color: "#2ecc71" },
   AWAY: { label: "Assente", color: "#f39c12" },
 };
@@ -134,9 +125,6 @@ export default function Sidebar() {
   const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  const searchParams = useMemo(() => new URLSearchParams(location.search), [location.search]);
-  const view = searchParams.get("view") || ""; // chats | search | chat
-
   // friend requests badge
   const [pendingRequests, setPendingRequests] = useState(0);
 
@@ -152,10 +140,6 @@ export default function Sidebar() {
         headers: { Authorization: `Bearer ${token}` },
       });
 
-      if (r.status === 401) {
-        setPendingRequests(0);
-        return;
-      }
       if (!r.ok) return;
 
       const data = await r.json();
@@ -175,7 +159,6 @@ export default function Sidebar() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // chiudi drawer quando cambi pagina
   useEffect(() => {
     if (drawerOpen) setDrawerOpen(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,14 +214,7 @@ export default function Sidebar() {
             alt="avatar"
             width={44}
             height={44}
-            style={{
-              width: 44,
-              height: 44,
-              borderRadius: 999,
-              objectFit: "cover",
-              border: "1px solid #333",
-              display: "block",
-            }}
+            style={{ width: 44, height: 44, borderRadius: 999, objectFit: "cover", border: "1px solid #333", display: "block" }}
             onError={(e) => ((e.currentTarget as any).style.display = "none")}
           />
         ) : (
@@ -307,6 +283,10 @@ export default function Sidebar() {
         <span>Profilo</span>
       </NavLink>
 
+      <NavLink to="/settings" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
+        <span>Impostazioni</span>
+      </NavLink>
+
       <NavLink to="/terms" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Termini</span>
       </NavLink>
@@ -319,24 +299,11 @@ export default function Sidebar() {
 
   const MobileNav = (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-      {/* PAGINE DEDICATE (via query param) */}
-      <Link
-        to="/?view=chats"
-        style={{
-          ...baseItemStyle,
-          background: location.pathname === "/" && (view === "" || view === "chats" || view === "chat") ? activeBg : "transparent",
-        }}
-      >
+      <Link to="/?view=chats" style={{ ...baseItemStyle, background: location.pathname === "/" ? activeBg : "transparent" }}>
         <span>Chat</span>
       </Link>
 
-      <Link
-        to="/?view=search"
-        style={{
-          ...baseItemStyle,
-          background: location.pathname === "/" && view === "search" ? activeBg : "transparent",
-        }}
-      >
+      <Link to="/?view=search" style={{ ...baseItemStyle, background: location.pathname === "/" ? "transparent" : "transparent" }}>
         <span>Cerca</span>
       </Link>
 
@@ -347,6 +314,10 @@ export default function Sidebar() {
 
       <NavLink to="/profile" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Profilo</span>
+      </NavLink>
+
+      <NavLink to="/settings" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
+        <span>Impostazioni</span>
       </NavLink>
 
       <NavLink to="/terms" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
@@ -474,21 +445,9 @@ export default function Sidebar() {
     );
   }
 
-  // DESKTOP
+  // desktop
   return (
-    <div
-      style={{
-        width: 260,
-        padding: 12,
-        borderRight: "1px solid #222",
-        background: "var(--tiko-bg-dark)",
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-        position: "relative",
-        overflow: "hidden",
-      }}
-    >
+    <div style={{ width: 260, padding: 12, borderRight: "1px solid #222", background: "var(--tiko-bg-dark)", display: "flex", flexDirection: "column", gap: 10, overflow: "hidden" }}>
       {HeaderBlock}
       {UserBlock}
       <div style={{ flex: 1, overflowY: "auto" }}>{DesktopNav}</div>

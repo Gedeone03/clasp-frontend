@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
@@ -20,7 +21,7 @@ import {
 import { useAuth } from "../AuthContext";
 import { useChatSocket } from "../hooks/useChatSocket";
 import { API_BASE_URL } from "../config";
-import { playNotificationBeep, unlockAudio } from "../utils/notifySound";
+import { playNotificationBeep } from "../utils/notifySound";
 
 type MessageLike = Message & {
   createdAt?: string;
@@ -37,10 +38,17 @@ function getAuthToken(): string {
       localStorage.getItem("authToken") ||
       localStorage.getItem("accessToken") ||
       "") + "";
+
   let t = raw.trim();
   t = t.replace(/^"(.*)"$/, "$1");
   if (t.toLowerCase().startsWith("bearer ")) t = t.slice(7).trim();
   return t;
+}
+
+function isSoundEnabled(): boolean {
+  // default: ON (se l’utente non ha mai toccato impostazioni)
+  const v = localStorage.getItem("clasp.soundEnabled");
+  return v !== "false";
 }
 
 function useIsMobile(breakpointPx = 1100) {
@@ -134,8 +142,10 @@ export default function HomePage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
 
+  // mobile views (pagine dedicate dentro /)
   const view = params.get("view") || ""; // chats | search | chat
   const cid = Number(params.get("cid") || 0);
+  const from = (params.get("from") || "chats") as "chats" | "search";
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<Conversation | null>(null);
@@ -159,7 +169,7 @@ export default function HomePage() {
   const [sentRequestUserIds, setSentRequestUserIds] = useState<Set<number>>(new Set());
   const [friendRequestMsg, setFriendRequestMsg] = useState<string | null>(null);
 
-  // Notifications
+  // Notifications (unread + toast)
   const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
   const totalUnread = useMemo(
     () => Object.values(unreadCounts).reduce((a, b) => a + (b || 0), 0),
@@ -169,11 +179,12 @@ export default function HomePage() {
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
 
-  const [soundLocked, setSoundLocked] = useState(false);
-  const lastBeepRef = useRef<number>(0);
-
+  // fallback polling
   const convKeysRef = useRef<Record<number, string>>({});
   const pollInitedRef = useRef(false);
+
+  // audio locked warning (una volta)
+  const audioWarnedRef = useRef(false);
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -183,11 +194,13 @@ export default function HomePage() {
 
   const notifyIncoming = async (msg: string) => {
     showToast(msg);
-    const now = Date.now();
-    if (now - lastBeepRef.current > 900) {
-      lastBeepRef.current = now;
-      const ok = await playNotificationBeep();
-      setSoundLocked(!ok);
+
+    if (!isSoundEnabled()) return;
+
+    const ok = await playNotificationBeep();
+    if (!ok && !audioWarnedRef.current) {
+      audioWarnedRef.current = true;
+      showToast("Audio bloccato: vai su Impostazioni per attivare il suono.");
     }
   };
 
@@ -195,12 +208,6 @@ export default function HomePage() {
     const base = "Clasp";
     document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base;
   }, [totalUnread]);
-
-  useEffect(() => {
-    // Non fidarti: alcuni browser dicono ok ma poi bloccano finché non clicchi.
-    // Qui settiamo solo lo stato iniziale.
-    unlockAudio().then((ok) => setSoundLocked(!ok));
-  }, []);
 
   async function loadConversationsInitial() {
     try {
@@ -212,7 +219,6 @@ export default function HomePage() {
       convKeysRef.current = nextKeys;
       pollInitedRef.current = true;
 
-      // desktop: auto select
       if (!isMobile && !selectedConversation && list.length > 0) {
         selectConversation(list[0]);
       }
@@ -255,12 +261,10 @@ export default function HomePage() {
     setUnreadCounts((prev) => ({ ...prev, [conv.id]: 0 }));
   };
 
-  // ✅ Realtime
+  // realtime socket
   const socket = useChatSocket(user ? user.id : null, {
     onMessage: async ({ conversationId, message }) => {
       const convId = Number(conversationId);
-
-      // evita doppia notifica col polling
       if (message?.id) convKeysRef.current[convId] = String(message.id);
       else if ((message as any)?.createdAt) convKeysRef.current[convId] = String((message as any).createdAt);
 
@@ -290,7 +294,6 @@ export default function HomePage() {
     },
   });
 
-  // ✅ quando cambia selectedConversation
   useEffect(() => {
     if (!selectedConversation) return;
     socket.joinConversation(selectedConversation.id);
@@ -298,23 +301,11 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedConversation?.id]);
 
-  // ✅ Mobile: gestisci “pagine dedicate” via query params
+  // Mobile: forziamo view default
   useEffect(() => {
     if (!isMobile) return;
-
-    // default
     if (!view) {
       navigate("/?view=chats", { replace: true });
-      return;
-    }
-
-    if (view === "search") {
-      // pagina ricerca: nessuna chat obbligatoria
-      return;
-    }
-
-    if (view === "chats") {
-      // pagina lista chat
       return;
     }
 
@@ -323,25 +314,13 @@ export default function HomePage() {
         navigate("/?view=chats", { replace: true });
         return;
       }
-      // seleziona la conversazione se esiste
-      const found = (conversations as any).find((c: any) => Number(c.id) === Number(cid));
-      if (found) {
-        if (selectedConversation?.id !== Number(cid)) selectConversation(found);
-      } else {
-        // se non c'è (lista non ancora caricata), ricarica e prova
-        fetchConversations()
-          .then((list) => {
-            setConversations(list);
-            const f = (list as any).find((c: any) => Number(c.id) === Number(cid));
-            if (f) selectConversation(f);
-          })
-          .catch(() => {});
-      }
+      const found = conversations.find((c) => c.id === cid) || null;
+      if (found && selectedConversation?.id !== cid) selectConversation(found);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isMobile, view, cid, conversations.length]);
 
-  // ✅ Polling fallback (notifiche anche se socket va in sleep su mobile)
+  // polling fallback
   useEffect(() => {
     if (!user) return;
 
@@ -370,7 +349,8 @@ export default function HomePage() {
           const nextKey = getConversationKey(c);
           const prevKey = prevKeys[id];
 
-          const currentlyOpen = selectedConversation?.id === id || (isMobile && view === "chat" && cid === id);
+          const currentlyOpen =
+            selectedConversation?.id === id || (isMobile && view === "chat" && cid === id);
 
           if (prevKey && nextKey && nextKey !== prevKey && !currentlyOpen) {
             setUnreadCounts((prev) => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
@@ -394,21 +374,6 @@ export default function HomePage() {
       window.clearInterval(timer);
     };
   }, [user?.id, selectedConversation?.id, isMobile, view, cid]);
-
-  const handleSend = (content: string) => {
-    if (!selectedConversation) return;
-    socket.sendMessage(selectedConversation.id, content, null);
-  };
-
-  const handleSendWithReply = (content: string, replyToId: number | null) => {
-    if (!selectedConversation) return;
-    socket.sendMessage(selectedConversation.id, content, replyToId ?? null);
-  };
-
-  const handleTyping = () => {
-    if (!selectedConversation) return;
-    socket.sendTyping(selectedConversation.id);
-  };
 
   const handleDeleteConversation = async () => {
     if (!selectedConversation) return;
@@ -453,15 +418,15 @@ export default function HomePage() {
     }
 
     try {
-      const params = new URLSearchParams();
-      if (qTrim) params.set("q", qTrim);
-      if (cityTrim) params.set("city", cityTrim);
-      if (areaTrim) params.set("area", areaTrim);
-      if (mood) params.set("mood", mood);
-      if (stateFilter) params.set("state", stateFilter);
-      if (visibleOnly) params.set("visibleOnly", "true");
+      const p = new URLSearchParams();
+      if (qTrim) p.set("q", qTrim);
+      if (cityTrim) p.set("city", cityTrim);
+      if (areaTrim) p.set("area", areaTrim);
+      if (mood) p.set("mood", mood);
+      if (stateFilter) p.set("state", stateFilter);
+      if (visibleOnly) p.set("visibleOnly", "true");
 
-      const r = await fetch(`${baseUrl}/users?${params.toString()}`, {
+      const r = await fetch(`${baseUrl}/users?${p.toString()}`, {
         headers: { Authorization: `Bearer ${tokenNow}` },
       });
 
@@ -491,15 +456,14 @@ export default function HomePage() {
     }
   }
 
-  const startChatWithUser = async (u: User) => {
+  const startChatWithUser = async (u: any) => {
     try {
-      const conv = await createConversation((u as any).id);
+      const conv = await createConversation(u.id);
       const list = await fetchConversations();
       setConversations(list);
-
       selectConversation(conv);
 
-      if (isMobile) navigate(`/?view=chat&cid=${conv.id}`);
+      if (isMobile) navigate(`/?view=chat&cid=${conv.id}&from=search`);
     } catch (e) {
       console.error(e);
       alert("Errore creazione chat");
@@ -528,7 +492,6 @@ export default function HomePage() {
     }
   };
 
-  // UI helpers
   const inputStyle: React.CSSProperties = {
     width: "100%",
     padding: "10px 12px",
@@ -648,15 +611,7 @@ export default function HomePage() {
               const isPendingSent = sentRequestUserIds.has(u.id);
 
               return (
-                <div
-                  key={u.id}
-                  style={{
-                    padding: 10,
-                    borderRadius: 14,
-                    background: "var(--tiko-bg-card)",
-                    border: "1px solid #2a2a2a",
-                  }}
-                >
+                <div key={u.id} style={{ padding: 10, borderRadius: 14, background: "var(--tiko-bg-card)", border: "1px solid #2a2a2a" }}>
                   <div style={{ fontSize: 13 }}>
                     <strong>{u.displayName}</strong> <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span>
                   </div>
@@ -699,18 +654,6 @@ export default function HomePage() {
     </div>
   );
 
-  const handleSoundButton = async () => {
-    // sempre visibile: click = prova a sbloccare + test beep
-    const ok = await unlockAudio();
-    setSoundLocked(!ok);
-    if (ok) {
-      await playNotificationBeep();
-      showToast("Suono attivo");
-    } else {
-      showToast("Tocca di nuovo per attivare il suono");
-    }
-  };
-
   const GlobalToast = toast ? (
     <div
       style={{
@@ -732,35 +675,10 @@ export default function HomePage() {
     </div>
   ) : null;
 
-  // ✅ bottone suono SEMPRE VISIBILE
-  const SoundButton = (
-    <button
-      type="button"
-      onClick={handleSoundButton}
-      style={{
-        position: "fixed",
-        right: 12,
-        bottom: 86, // più su per non sovrapporsi alla barra chat
-        zIndex: 20001,
-        borderRadius: 14,
-        padding: "10px 12px",
-        border: "1px solid #2a2a2a",
-        background: "rgba(0,0,0,0.78)",
-        color: "#fff",
-        fontWeight: 950,
-        cursor: "pointer",
-      }}
-      title="Attiva/Testa suono notifiche"
-    >
-      {soundLocked ? "Attiva suono" : "Test suono"}
-    </button>
-  );
-
   if (!user) return <div>Non autenticato</div>;
 
-  // MOBILE: pagine dedicate
+  // MOBILE: 3 “pagine dedicate” interne
   if (isMobile) {
-    // view default (se qualcuno entra su / senza param)
     const effectiveView = view || "chats";
 
     if (effectiveView === "search") {
@@ -769,7 +687,6 @@ export default function HomePage() {
           <Sidebar />
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>{SearchPanel}</div>
           {GlobalToast}
-          {SoundButton}
         </div>
       );
     }
@@ -784,21 +701,29 @@ export default function HomePage() {
               messages={messages}
               currentUser={user}
               typingUserId={typingUserId}
-              onSend={handleSend}
-              onSendWithReply={handleSendWithReply}
-              onTyping={handleTyping}
+              onSend={(content) => {
+                if (!selectedConversation) return;
+                socket.sendMessage(selectedConversation.id, content, null);
+              }}
+              onSendWithReply={(content, replyToId) => {
+                if (!selectedConversation) return;
+                socket.sendMessage(selectedConversation.id, content, replyToId ?? null);
+              }}
+              onTyping={() => {
+                if (!selectedConversation) return;
+                socket.sendTyping(selectedConversation.id);
+              }}
               onDeleteConversation={handleDeleteConversation}
-              onBack={() => navigate("/?view=chats")}
+              onBack={() => navigate(from === "search" ? "/?view=search" : "/?view=chats")}
               onOpenChats={() => navigate("/?view=chats")}
             />
           </div>
           {GlobalToast}
-          {SoundButton}
         </div>
       );
     }
 
-    // chats (lista)
+    // chats list
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
@@ -808,18 +733,17 @@ export default function HomePage() {
             selectedConversationId={selectedConversation?.id ?? null}
             onSelect={(conv) => {
               selectConversation(conv);
-              navigate(`/?view=chat&cid=${conv.id}`);
+              navigate(`/?view=chat&cid=${conv.id}&from=chats`);
             }}
             unreadCounts={unreadCounts}
           />
         </div>
         {GlobalToast}
-        {SoundButton}
       </div>
     );
   }
 
-  // DESKTOP: layout classico
+  // DESKTOP layout (colonna sinistra ricerca + lista chat)
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
@@ -853,16 +777,24 @@ export default function HomePage() {
             messages={messages}
             currentUser={user}
             typingUserId={typingUserId}
-            onSend={handleSend}
-            onSendWithReply={handleSendWithReply}
-            onTyping={handleTyping}
+            onSend={(content) => {
+              if (!selectedConversation) return;
+              socket.sendMessage(selectedConversation.id, content, null);
+            }}
+            onSendWithReply={(content, replyToId) => {
+              if (!selectedConversation) return;
+              socket.sendMessage(selectedConversation.id, content, replyToId ?? null);
+            }}
+            onTyping={() => {
+              if (!selectedConversation) return;
+              socket.sendTyping(selectedConversation.id);
+            }}
             onDeleteConversation={handleDeleteConversation}
           />
         </div>
       </div>
 
       {GlobalToast}
-      {SoundButton}
     </div>
   );
 }

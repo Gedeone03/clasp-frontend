@@ -1,122 +1,164 @@
-// src/pages/SettingsPage.tsx
-
-import React from "react";
+import React, { useMemo, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
-import { useAuth } from "../AuthContext";
-import { useI18n } from "../LanguageContext";
+import { unlockAudio, playNotificationBeep } from "../utils/notifySound";
 
-const APP_VERSION = "0.1.0";
+function useIsMobile(breakpointPx = 1100) {
+  const compute = () => {
+    const coarse =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
 
-const SettingsPage: React.FC = () => {
-  const { user, logout } = useAuth();
-  const { lang, setLang, t } = useI18n();
+    const ua =
+      typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
 
-  if (!user) return <div>Not authenticated</div>;
+    return coarse || uaMobile || window.innerWidth < breakpointPx;
+  };
+
+  const [isMobile, setIsMobile] = useState(compute);
+
+  React.useEffect(() => {
+    const onResize = () => setIsMobile(compute());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  return isMobile;
+}
+
+function readSoundEnabled(): boolean {
+  const v = localStorage.getItem("clasp.soundEnabled");
+  return v !== "false"; // default ON
+}
+
+export default function SettingsPage() {
+  const isMobile = useIsMobile(1100);
+  const [soundEnabled, setSoundEnabled] = useState<boolean>(readSoundEnabled());
+  const [msg, setMsg] = useState<string | null>(null);
+
+  const containerStyle: React.CSSProperties = useMemo(
+    () => ({
+      height: "100vh",
+      display: "flex",
+      flexDirection: isMobile ? "column" : "row",
+      background: "var(--tiko-bg-dark)",
+      overflow: "hidden",
+    }),
+    [isMobile]
+  );
+
+  const contentStyle: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 0,
+    overflowY: "auto",
+    padding: 16,
+  };
+
+  const cardStyle: React.CSSProperties = {
+    background: "var(--tiko-bg-card)",
+    border: "1px solid #222",
+    borderRadius: 14,
+    padding: 14,
+  };
+
+  const toggleSound = async () => {
+    if (soundEnabled) {
+      localStorage.setItem("clasp.soundEnabled", "false");
+      setSoundEnabled(false);
+      setMsg("Suono notifiche disattivato.");
+      return;
+    }
+
+    // abilitazione: serve gesto utente -> proviamo a sbloccare e facciamo beep
+    localStorage.setItem("clasp.soundEnabled", "true");
+    const okUnlock = await unlockAudio();
+    if (!okUnlock) {
+      setSoundEnabled(true); // la preferenza è ON, ma il browser può bloccare finché non clicchi ancora
+      setMsg("Il browser sta bloccando l’audio. Premi ancora “Attiva suono” per sbloccarlo.");
+      return;
+    }
+
+    await playNotificationBeep();
+    setSoundEnabled(true);
+    setMsg("Suono notifiche attivato.");
+  };
 
   return (
-    <div className="tiko-layout">
+    <div style={containerStyle}>
       <Sidebar />
 
-      <div
-        className="tiko-content"
-        style={{
-          padding: 24,
-          overflowY: "auto",
-          display: "flex",
-          justifyContent: "center",
-        }}
-      >
-        {/* Contenitore centrale */}
-        <div style={{ width: "100%", maxWidth: 820, display: "flex", flexDirection: "column", gap: 20 }}>
-          {/* Header */}
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: 16,
-            }}
-          >
-            <h1 className="tiko-title" style={{ margin: 0 }}>
-              {t("settingsTitle")}
-            </h1>
+      <div style={contentStyle}>
+        <div style={{ maxWidth: 860, margin: "0 auto", display: "flex", flexDirection: "column", gap: 14 }}>
+          <h1 style={{ margin: 0 }}>Impostazioni</h1>
+          <div style={{ color: "var(--tiko-text-dim)", fontSize: 13 }}>
+            Qui aggiungeremo le funzioni future (sfondi, tema, preferenze, ecc.).
+          </div>
+
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 950, marginBottom: 8 }}>Notifiche</div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontWeight: 900 }}>Suono messaggi</div>
+                <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                  Attiva/disattiva il suono delle notifiche (su mobile può richiedere un click per sbloccare l’audio).
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleSound}
+                style={{
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  border: "1px solid #2a2a2a",
+                  background: soundEnabled ? "#ff3b30" : "var(--tiko-mint)",
+                  color: soundEnabled ? "#fff" : "#000",
+                  fontWeight: 950,
+                  cursor: "pointer",
+                }}
+              >
+                {soundEnabled ? "Disattiva suono" : "Attiva suono"}
+              </button>
+            </div>
+
+            {msg && <div style={{ marginTop: 10, fontSize: 12, color: "var(--tiko-text-dim)" }}>{msg}</div>}
+          </div>
+
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 950, marginBottom: 8 }}>Aspetto</div>
+            <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+              Prossime funzioni:
+              <ul style={{ marginTop: 6 }}>
+                <li>Cambia sfondo chat</li>
+                <li>Tema chiaro/scuro</li>
+                <li>Dimensione testo</li>
+              </ul>
+            </div>
 
             <button
-              onClick={logout}
-              style={{ background: "var(--tiko-magenta)" }}
+              type="button"
+              disabled
+              style={{
+                marginTop: 8,
+                borderRadius: 12,
+                padding: "10px 12px",
+                border: "1px solid #2a2a2a",
+                background: "#333",
+                color: "#bbb",
+                fontWeight: 900,
+                cursor: "not-allowed",
+              }}
+              title="In arrivo"
             >
-              {t("settingsLogout")}
+              Cambia sfondo (in arrivo)
             </button>
-          </div>
-
-          {/* Lingua */}
-          <div className="tiko-card">
-            <h2 style={{ marginBottom: 10 }}>{t("settingsLanguage")}</h2>
-
-            <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
-              <select
-                value={lang}
-                onChange={(e) => setLang(e.target.value as any)}
-                style={{ width: 260 }}
-              >
-                <option value="it">{t("settingsLanguageIt")}</option>
-                <option value="en">{t("settingsLanguageEn")}</option>
-              </select>
-
-              <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                La scelta viene salvata automaticamente.
-              </div>
-            </div>
-          </div>
-
-          {/* Account */}
-          <div className="tiko-card">
-            <h2 style={{ marginBottom: 10 }}>{t("settingsAccount")}</h2>
-
-            <div style={{ fontSize: 14 }}>
-              <div>
-                <strong>{t("profileName")}:</strong> {user.displayName}
-              </div>
-              <div>
-                <strong>{t("profileUsername")}:</strong> @{user.username}
-              </div>
-              <div>
-                <strong>{t("profileEmail")}:</strong> {user.email}
-              </div>
-              <div>
-                <strong>ID:</strong> {user.id}
-              </div>
-            </div>
-          </div>
-
-          {/* Info + Legal */}
-          <div className="tiko-card">
-            <h2 style={{ marginBottom: 10 }}>{t("settingsAbout")}</h2>
-
-            <div style={{ fontSize: 14, color: "var(--tiko-text-dim)" }}>
-              <div>
-                <strong>{t("settingsVersion")}:</strong> {APP_VERSION}
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <a href="/privacy" style={{ color: "var(--tiko-blue)" }}>
-                  {t("authPrivacy")}
-                </a>{" "}
-                •{" "}
-                <a href="/terms" style={{ color: "var(--tiko-blue)" }}>
-                  {t("authTerms")}
-                </a>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                CLASP è una piattaforma di chat e amicizie in tempo reale. Questa è una versione in sviluppo (beta).
-              </div>
-            </div>
           </div>
         </div>
       </div>
     </div>
   );
-};
-
-export default SettingsPage;
+}

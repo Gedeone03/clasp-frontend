@@ -1,220 +1,92 @@
-// src/pages/TermsPage.tsx
-
 import React from "react";
-import { useNavigate } from "react-router-dom";
-import { useI18n } from "../LanguageContext";
+import Sidebar from "../components/ui/Sidebar";
 
-type Section = { title: string; body: string[] };
+function useIsMobile(breakpointPx = 1100) {
+  const compute = () => {
+    const coarse =
+      typeof window !== "undefined" &&
+      typeof window.matchMedia === "function" &&
+      window.matchMedia("(pointer: coarse)").matches;
 
-const TermsPage: React.FC = () => {
-  const navigate = useNavigate();
-  const { lang } = useI18n();
+    const ua =
+      typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
 
-  const content: { title: string; intro: string; sections: Section[] } =
-    lang === "en"
-      ? {
-          title: "Terms and Conditions",
-          intro:
-            "These Terms and Conditions govern your use of CLASP. By accessing or using the service, you agree to these terms.",
-          sections: [
-            {
-              title: "1. Introduction",
-              body: [
-                "CLASP is a social communication service. Please read these terms carefully before using the platform.",
-              ],
-            },
-            {
-              title: "2. Description of the service",
-              body: [
-                "CLASP allows users to create a profile, communicate with other users, share multimedia content, and connect based on interests and moods.",
-                "The service is free of charge.",
-              ],
-            },
-            {
-              title: "3. Account and responsibility",
-              body: [
-                "You are responsible for the information you provide and for keeping your account secure.",
-                "It is prohibited to impersonate others, provide false information, or use someone else’s account without authorization.",
-              ],
-            },
-            {
-              title: "4. Proper use of the service",
-              body: [
-                "You agree to use CLASP lawfully and respectfully.",
-                "It is not permitted to send illegal, offensive, or harmful content, harass other users, or use the service for fraud or spam.",
-              ],
-            },
-            {
-              title: "5. User content",
-              body: [
-                "You are solely responsible for the content you share through CLASP.",
-                "CLASP does not pre-screen content but may intervene in case of violations of these terms.",
-              ],
-            },
-            {
-              title: "6. Suspension or termination",
-              body: [
-                "CLASP may suspend or terminate accounts that violate these terms, compromise the platform’s security, or cause harm to other users.",
-              ],
-            },
-            {
-              title: "7. Limitation of liability",
-              body: [
-                "CLASP provides the service “as is”, without guarantees of uninterrupted availability or error-free operation.",
-                "To the extent permitted by law, CLASP is not liable for damages arising from the use of the service.",
-              ],
-            },
-            {
-              title: "8. Changes to the terms",
-              body: [
-                "These Terms and Conditions may be updated over time.",
-                "Continued use of the service constitutes acceptance of the updated terms.",
-              ],
-            },
-            {
-              title: "9. Applicable law",
-              body: [
-                "These terms are governed by applicable laws based on the user’s country of residence, without prejudice to local consumer protection rights.",
-              ],
-            },
-          ],
-        }
-      : {
-          title: "Termini e Condizioni",
-          intro:
-            "I presenti Termini e Condizioni regolano l’utilizzo di CLASP. Accedendo o utilizzando il servizio, accetti questi termini.",
-          sections: [
-            {
-              title: "1. Introduzione",
-              body: [
-                "CLASP è un servizio di comunicazione e connessione sociale. Ti invitiamo a leggere con attenzione questi termini prima di utilizzare la piattaforma.",
-              ],
-            },
-            {
-              title: "2. Descrizione del servizio",
-              body: [
-                "CLASP consente agli utenti di creare un profilo, comunicare con altri utenti, condividere contenuti multimediali e connettersi in base a interessi e mood.",
-                "Il servizio è gratuito.",
-              ],
-            },
-            {
-              title: "3. Account e responsabilità",
-              body: [
-                "Sei responsabile delle informazioni fornite e della sicurezza del tuo account.",
-                "È vietato impersonare altre persone, fornire informazioni false o utilizzare account di terzi senza autorizzazione.",
-              ],
-            },
-            {
-              title: "4. Uso corretto del servizio",
-              body: [
-                "L’utente si impegna a utilizzare CLASP in modo lecito e rispettoso.",
-                "Non è consentito inviare contenuti illegali, offensivi o dannosi, molestare altri utenti o utilizzare il servizio per frodi o spam.",
-              ],
-            },
-            {
-              title: "5. Contenuti degli utenti",
-              body: [
-                "Sei l’unico responsabile dei contenuti che condividi tramite CLASP.",
-                "CLASP non controlla preventivamente i contenuti ma può intervenire in caso di violazioni dei presenti termini.",
-              ],
-            },
-            {
-              title: "6. Sospensione o chiusura dell’account",
-              body: [
-                "CLASP può sospendere o chiudere account che violano i termini, compromettono la sicurezza della piattaforma o arrecano danni ad altri utenti.",
-              ],
-            },
-            {
-              title: "7. Limitazione di responsabilità",
-              body: [
-                "CLASP fornisce il servizio “così com’è”, senza garanzie di continuità o assenza di errori.",
-                "Nei limiti consentiti dalla legge, CLASP non è responsabile per danni derivanti dall’uso del servizio.",
-              ],
-            },
-            {
-              title: "8. Modifiche ai termini",
-              body: [
-                "I Termini e Condizioni possono essere aggiornati nel tempo.",
-                "L’uso continuato del servizio implica l’accettazione delle modifiche.",
-              ],
-            },
-            {
-              title: "9. Legge applicabile",
-              body: [
-                "I presenti termini sono regolati dalla normativa applicabile in base al paese di residenza dell’utente, senza pregiudizio dei diritti garantiti dalle leggi locali.",
-              ],
-            },
-          ],
-        };
+    return coarse || uaMobile || window.innerWidth < breakpointPx;
+  };
+
+  const [isMobile, setIsMobile] = React.useState(compute);
+  React.useEffect(() => {
+    const onResize = () => setIsMobile(compute());
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return isMobile;
+}
+
+export default function TermsPage() {
+  const isMobile = useIsMobile(1100);
 
   return (
     <div
       style={{
-        minHeight: "100vh",
-        background: "var(--tiko-bg-dark)",
-        color: "var(--tiko-text)",
-        padding: "32px 16px",
+        height: "100vh",
         display: "flex",
-        justifyContent: "center",
+        flexDirection: isMobile ? "column" : "row",
+        background: "var(--tiko-bg-dark)",
+        overflow: "hidden",
       }}
     >
-      <div
-        style={{
-          maxWidth: 860,
-          width: "100%",
-          background: "var(--tiko-bg-card)",
-          borderRadius: 16,
-          padding: 24,
-          boxShadow: "var(--tiko-glow)",
-        }}
-      >
-        <div
-          style={{
-            marginBottom: 18,
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 16,
-          }}
-        >
-          <h1 className="tiko-title">{content.title}</h1>
-          <button
-            onClick={() => navigate(-1)}
-            style={{
-              padding: "8px 14px",
-              background: "var(--tiko-purple)",
-              fontSize: 13,
-            }}
-          >
-            {lang === "en" ? "Back" : "Torna indietro"}
-          </button>
+      <Sidebar />
+
+      <div style={{ flex: 1, minWidth: 0, minHeight: 0, overflowY: "auto" }}>
+        <div style={{ maxWidth: 900, margin: "0 auto", padding: 16, lineHeight: 1.55 }}>
+          <h1 style={{ marginTop: 0 }}>Termini e Condizioni d’Uso</h1>
+          <p style={{ color: "var(--tiko-text-dim)" }}>Ultimo aggiornamento: 2025-12-19</p>
+
+          <h2>1. Oggetto</h2>
+          <p>
+            Clasp è un servizio di comunicazione sociale (chat) accessibile via browser. Utilizzando il servizio accetti i presenti Termini.
+          </p>
+
+          <h2>2. Account</h2>
+          <ul>
+            <li>Sei responsabile delle credenziali e dell’uso del tuo account.</li>
+            <li>Non devi impersonare altre persone o fornire dati falsi.</li>
+          </ul>
+
+          <h2>3. Contenuti e Condotta</h2>
+          <ul>
+            <li>È vietato pubblicare contenuti illegali, violenti, d’odio, molesti o che violino diritti altrui.</li>
+            <li>È vietato tentare di compromettere la sicurezza del servizio.</li>
+            <li>Puoi inviare messaggi e file nei limiti consentiti dall’app.</li>
+          </ul>
+
+          <h2>4. Privacy</h2>
+          <p>
+            Il trattamento dei dati personali è descritto nell’Informativa Privacy. Usando Clasp dichiari di averla letta.
+          </p>
+
+          <h2>5. Disponibilità e Modifiche</h2>
+          <p>
+            Il servizio può essere aggiornato, modificato o sospeso per manutenzione o esigenze tecniche. Potremmo aggiornare questi Termini;
+            le modifiche saranno efficaci dalla pubblicazione.
+          </p>
+
+          <h2>6. Limitazioni di responsabilità</h2>
+          <p>
+            Nei limiti consentiti dalla legge, Clasp non è responsabile per perdite indirette, interruzioni del servizio o contenuti scambiati tra utenti.
+          </p>
+
+          <h2>7. Contatti</h2>
+          <p>
+            Per segnalazioni o richieste: inserire qui un contatto email o un form (consigliato).
+          </p>
+
+          <div style={{ height: 40 }} />
         </div>
-
-        <p style={{ fontSize: 14, color: "var(--tiko-text-dim)", marginBottom: 16 }}>
-          {content.intro}
-        </p>
-
-        {content.sections.map((s) => (
-          <section key={s.title} style={{ marginBottom: 18 }}>
-            <h2 style={{ fontSize: 18, marginBottom: 6 }}>{s.title}</h2>
-            {s.body.map((line, idx) => (
-              <p
-                key={idx}
-                style={{
-                  fontSize: 14,
-                  color: "var(--tiko-text-dim)",
-                  margin: "6px 0",
-                  whiteSpace: "pre-wrap",
-                }}
-              >
-                {line}
-              </p>
-            ))}
-          </section>
-        ))}
       </div>
     </div>
   );
-};
-
-export default TermsPage;
+}
