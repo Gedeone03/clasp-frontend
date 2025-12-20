@@ -1,5 +1,5 @@
-import React, { useEffect, useRef, useState } from "react";
-import { uploadAudio, uploadImage } from "../../api";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { sendMessage, uploadAudio, uploadFile, uploadImage } from "../../api";
 
 type User = {
   id: number;
@@ -8,15 +8,7 @@ type User = {
   avatarUrl?: string | null;
 };
 
-type Msg = {
-  id: number;
-  content: string;
-  createdAt: string;
-  senderId: number;
-  editedAt?: string | null;
-  deletedAt?: string | null;
-  replyToId?: number | null;
-};
+type MsgAny = any;
 
 function formatTime(dt: any): string {
   const d = new Date(dt);
@@ -24,21 +16,11 @@ function formatTime(dt: any): string {
   return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-function isImagePayload(s: string) {
-  return s.startsWith("__image__:");
-}
-function isAudioPayload(s: string) {
-  return s.startsWith("__audio__:");
-}
-function isFilePayload(s: string) {
-  return s.startsWith("__file__:");
-}
-
 function parsePayload(content: string): { kind: "text" | "image" | "audio" | "file"; url?: string; name?: string; text?: string } {
   const c = String(content || "");
-  if (isImagePayload(c)) return { kind: "image", url: c.slice(9).trim() };
-  if (isAudioPayload(c)) return { kind: "audio", url: c.slice(9).trim() };
-  if (isFilePayload(c)) {
+  if (c.startsWith("__image__:")) return { kind: "image", url: c.slice(9).trim() };
+  if (c.startsWith("__audio__:")) return { kind: "audio", url: c.slice(9).trim() };
+  if (c.startsWith("__file__:")) {
     const rest = c.slice(8).trim();
     const [u, name] = rest.split("|");
     return { kind: "file", url: (u || "").trim(), name: (name || "").trim() || undefined };
@@ -46,16 +28,25 @@ function parsePayload(content: string): { kind: "text" | "image" | "audio" | "fi
   return { kind: "text", text: c };
 }
 
+function axiosErrorToText(e: any): string {
+  const status = e?.response?.status;
+  const data = e?.response?.data;
+  const msg = e?.message;
+  if (status) return `Errore invio (${status}) ${typeof data === "string" ? data : ""}`.trim();
+  return msg || "Errore invio";
+}
+
 export default function ChatWindow(props: any) {
   const me: User | null = props?.me || props?.user || props?.currentUser || null;
   const otherUser: User | null = props?.otherUser || props?.other || props?.peerUser || props?.friend || null;
 
-  const messages: Msg[] = Array.isArray(props?.messages) ? props.messages : [];
-  const typingUserId: number | null = props?.typingUserId ?? null;
+  const incoming: MsgAny[] = Array.isArray(props?.messages) ? props.messages : [];
+  const [messages, setMessages] = useState<MsgAny[]>(incoming);
 
-  const onBack: (() => void) | undefined = props?.onBack;
-  const onSendWithReply: ((content: string, replyToId: number | null) => Promise<void> | void) | undefined = props?.onSendWithReply;
-  const onSend: ((content: string) => Promise<void> | void) | undefined = props?.onSend || props?.onSendMessage;
+  useEffect(() => {
+    setMessages(incoming);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [incoming?.length]);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -67,131 +58,111 @@ export default function ChatWindow(props: any) {
   const [text, setText] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [replyTo, setReplyTo] = useState<Msg | null>(null);
+
+  const onBack: (() => void) | undefined = props?.onBack;
+  const typingUserId: number | null = props?.typingUserId ?? null;
+
+  // ✅ risoluzione convId SUPER robusta (non cambia UI)
+  const conversationId: number = useMemo(() => {
+    const candidates: any[] = [];
+
+    candidates.push(props?.conversationId);
+    candidates.push(props?.conversation?.id);
+    candidates.push(props?.selectedConversation?.id);
+    candidates.push(props?.selectedConversationId);
+    candidates.push(props?.conversation?.conversationId);
+    candidates.push(props?.selectedConversation?.conversationId);
+
+    // fallback da URL (spesso usato: ?cid=123)
+    try {
+      const p = new URLSearchParams(window.location.search);
+      const cid = p.get("cid");
+      if (cid) candidates.push(cid);
+    } catch {}
+
+    // fallback dai messaggi (se presenti)
+    try {
+      const first = incoming?.[0];
+      if (first?.conversationId) candidates.push(first.conversationId);
+    } catch {}
+
+    for (const c of candidates) {
+      const n = Number(c);
+      if (Number.isFinite(n) && n > 0) return n;
+    }
+    return 0;
+  }, [
+    props?.conversationId,
+    props?.conversation,
+    props?.selectedConversation,
+    props?.selectedConversationId,
+    incoming,
+  ]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // audio recorder
-  const recorderRef = useRef<any>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-  const timerRef = useRef<number | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [recMs, setRecMs] = useState(0);
-
-  async function doSend(content: string) {
+  async function doSendContent(content: string) {
     const c = content.trim();
     if (!c) return;
 
-    if (!onSendWithReply && !onSend) {
-      setErr("Callback invio mancante (onSend / onSendWithReply).");
+    if (!conversationId) {
+      setErr("Impossibile inviare: conversationId mancante (seleziona una chat e riprova).");
       return;
     }
 
     setErr(null);
     setBusy(true);
     try {
-      if (onSendWithReply) await onSendWithReply(c, replyTo?.id ?? null);
-      else if (onSend) await onSend(c);
+      const created = await sendMessage(conversationId, c, null);
+
+      // aggiorno UI subito (senza cambiare layout)
+      setMessages((prev) => {
+        const exists = prev.some((m: any) => Number(m?.id) === Number(created?.id));
+        return exists ? prev : [...prev, created as any];
+      });
 
       setText("");
-      setReplyTo(null);
     } catch (e: any) {
-      setErr(e?.message || "Errore invio messaggio");
+      console.error("SEND ERROR", e);
+      setErr(axiosErrorToText(e));
     } finally {
       setBusy(false);
     }
   }
 
-  async function handlePickAnyFile(file: File) {
+  async function handlePickFile(file: File) {
+    if (!conversationId) {
+      setErr("Impossibile inviare file: conversationId mancante.");
+      return;
+    }
+
     setErr(null);
     setBusy(true);
     try {
       const mime = file.type || "";
+      let payload = "";
 
-      // immagini -> /upload/image
       if (mime.startsWith("image/")) {
         const up = await uploadImage(file);
-        await doSend(`__image__:${up.url}`);
-        return;
-      }
-
-      // audio -> /upload/audio (fallback interno in api.ts)
-      if (mime.startsWith("audio/")) {
+        payload = `__image__:${up.url}`;
+      } else if (mime.startsWith("audio/")) {
         const up = await uploadAudio(file);
-        await doSend(`__audio__:${up.url}`);
-        return;
+        payload = `__audio__:${up.url}`;
+      } else {
+        const up = await uploadFile(file);
+        payload = `__file__:${up.url}|${file.name || "file"}`;
       }
 
-      // altri file: usiamo uploadAudio fallback (che prova /upload/file e /upload/image)
-      const up = await uploadAudio(file);
-      await doSend(`__file__:${up.url}|${file.name || "file"}`);
+      const created = await sendMessage(conversationId, payload, null);
+      setMessages((prev) => {
+        const exists = prev.some((m: any) => Number(m?.id) === Number(created?.id));
+        return exists ? prev : [...prev, created as any];
+      });
     } catch (e: any) {
-      setErr(e?.message || "Errore invio file/audio");
+      console.error("FILE SEND ERROR", e);
+      setErr(axiosErrorToText(e));
     } finally {
       setBusy(false);
-    }
-  }
-
-  async function startRecording() {
-    setErr(null);
-    if (!navigator.mediaDevices?.getUserMedia) {
-      setErr("Registrazione non supportata su questo browser.");
-      return;
-    }
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const MediaRecorderAny = (window as any).MediaRecorder;
-      if (!MediaRecorderAny) {
-        stream.getTracks().forEach((t: any) => t.stop());
-        setErr("MediaRecorder non disponibile.");
-        return;
-      }
-
-      chunksRef.current = [];
-      setRecMs(0);
-
-      const rec = new MediaRecorderAny(stream);
-      recorderRef.current = rec;
-
-      rec.ondataavailable = (e: any) => {
-        if (e?.data && e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      rec.onstop = async () => {
-        try {
-          stream.getTracks().forEach((t: any) => t.stop());
-          const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
-          const ext = String(rec.mimeType || "").includes("ogg") ? "ogg" : "webm";
-          const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: blob.type || "audio/webm" });
-          await handlePickAnyFile(file);
-        } catch (e: any) {
-          setErr(e?.message || "Errore invio audio");
-        }
-      };
-
-      rec.start(250);
-      setRecording(true);
-
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      timerRef.current = window.setInterval(() => setRecMs((p) => p + 250), 250);
-    } catch (e: any) {
-      setErr(e?.message || "Permesso microfono negato.");
-    }
-  }
-
-  function stopRecording() {
-    try {
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      timerRef.current = null;
-
-      const rec = recorderRef.current;
-      recorderRef.current = null;
-
-      setRecording(false);
-      if (rec && rec.state !== "inactive") rec.stop();
-    } catch (e: any) {
-      setErr(e?.message || "Errore stop registrazione");
     }
   }
 
@@ -225,8 +196,8 @@ export default function ChatWindow(props: any) {
       </div>
 
       <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12, background: "var(--tiko-bg-dark)" }}>
-        {messages.map((m) => {
-          const mine = me?.id && m.senderId === me.id;
+        {messages.map((m: any) => {
+          const mine = me?.id && Number(m.senderId) === Number(me.id);
           const p = parsePayload(String(m.content ?? ""));
           const deleted = !!m.deletedAt;
 
@@ -251,13 +222,6 @@ export default function ChatWindow(props: any) {
 
                 <div style={{ marginTop: 6, fontSize: 11, color: "var(--tiko-text-dim)", display: "flex", justifyContent: "space-between", gap: 10 }}>
                   <span>{formatTime(m.createdAt)}</span>
-                  <button
-                    type="button"
-                    onClick={() => setReplyTo(m)}
-                    style={{ background: "transparent", border: "none", color: "#3ABEFF", cursor: "pointer", fontWeight: 900, padding: 0 }}
-                  >
-                    Rispondi
-                  </button>
                 </div>
               </div>
             </div>
@@ -265,22 +229,10 @@ export default function ChatWindow(props: any) {
         })}
       </div>
 
-      {/* ✅ BARRA CHAT RIPRISTINATA (web+mobile) */}
       <div style={{ borderTop: "1px solid #222", background: "var(--tiko-bg-card)", padding: 10, position: "sticky", bottom: 0 }}>
         {err && (
           <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 850 }}>
             {err}
-          </div>
-        )}
-
-        {replyTo && (
-          <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 12, border: "1px solid #2a2a2a", background: "rgba(255,255,255,0.03)", display: "flex", justifyContent: "space-between", gap: 10 }}>
-            <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-              Risposta a <strong>#{replyTo.id}</strong>
-            </div>
-            <button type="button" onClick={() => setReplyTo(null)} style={{ background: "transparent", border: "none", color: "#ff3b30", fontWeight: 950, cursor: "pointer" }}>
-              Annulla
-            </button>
           </div>
         )}
 
@@ -289,35 +241,22 @@ export default function ChatWindow(props: any) {
             📎
           </button>
 
+          {/* ✅ NIENTE accept=image/* e NIENTE capture -> su mobile compaiono anche Documenti */}
           <input
             ref={fileInputRef}
             type="file"
             style={{ display: "none" }}
             onChange={(e) => {
               const f = e.target.files?.[0];
-              if (f) handlePickAnyFile(f);
+              if (f) handlePickFile(f);
               e.currentTarget.value = "";
             }}
           />
 
-          <button
-            type="button"
-            style={{
-              ...iconBtn,
-              background: recording ? "rgba(255,59,48,0.18)" : "var(--tiko-bg-dark)",
-              borderColor: recording ? "#ff3b30" : "#2a2a2a",
-            }}
-            onClick={() => (recording ? stopRecording() : startRecording())}
-            disabled={busy}
-            title={recording ? "Stop registrazione" : "Registra audio"}
-          >
-            🎙️
-          </button>
-
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={recording ? `Registrazione… ${(recMs / 1000).toFixed(1)}s` : "Scrivi un messaggio…"}
+            placeholder="Scrivi un messaggio…"
             style={{
               flex: 1,
               resize: "none",
@@ -332,11 +271,11 @@ export default function ChatWindow(props: any) {
               fontSize: 14,
               lineHeight: 1.25,
             }}
-            disabled={busy || recording}
+            disabled={busy}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                doSend(text);
+                doSendContent(text);
               }
             }}
           />
@@ -344,8 +283,8 @@ export default function ChatWindow(props: any) {
           <button
             type="button"
             style={{ minWidth: 80, height: 42, borderRadius: 12, border: "1px solid #2a2a2a", background: "#7A29FF", color: "#fff", fontWeight: 950, cursor: "pointer", opacity: busy ? 0.7 : 1 }}
-            disabled={busy || recording || !text.trim()}
-            onClick={() => doSend(text)}
+            disabled={busy || !text.trim()}
+            onClick={() => doSendContent(text)}
           >
             {busy ? "…" : "Invia"}
           </button>

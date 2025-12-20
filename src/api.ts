@@ -8,9 +8,7 @@ function normalizeToken(raw: unknown): string {
   let t = String(raw ?? "").trim();
   if (!t) return "";
   if (t.toLowerCase().startsWith("bearer ")) t = t.slice(7).trim();
-  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
-    t = t.slice(1, -1).trim();
-  }
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1).trim();
   return t;
 }
 
@@ -23,10 +21,6 @@ export function getAuthToken(): string {
   return normalizeToken(raw);
 }
 
-/**
- * ✅ Questa è la funzione che AuthContext si aspetta.
- * Applica (o rimuove) l'header Authorization sia su api (istanza) che su axios globale.
- */
 export function loadAuthTokenFromStorage() {
   const t = getAuthToken();
   if (t) {
@@ -43,7 +37,6 @@ export function setAuthToken(token: string | null) {
   if (clean) {
     localStorage.setItem("token", clean);
     localStorage.setItem("authToken", clean);
-    // opzionale: compat
     localStorage.setItem("accessToken", clean);
   } else {
     localStorage.removeItem("token");
@@ -70,9 +63,7 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
-// applica token al boot
 loadAuthTokenFromStorage();
-
 export default api;
 
 /* =======================
@@ -140,10 +131,7 @@ export async function register(data: {
   return res.data;
 }
 
-export async function login(data: {
-  emailOrUsername: string;
-  password: string;
-}): Promise<AuthResponse> {
+export async function login(data: { emailOrUsername: string; password: string }): Promise<AuthResponse> {
   const res = await api.post<AuthResponse>("/auth/login", data);
   return res.data;
 }
@@ -159,16 +147,12 @@ export async function patchMe(data: Partial<User>): Promise<User> {
 }
 
 /* =======================
-   UPLOAD (immagini/audio/file)
+   UPLOAD
 ======================= */
 async function uploadMultipart(path: string, field: string, file: File): Promise<string> {
   const fd = new FormData();
   fd.append(field, file);
-
-  const res = await api.post(path, fd, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-
+  const res = await api.post(path, fd, { headers: { "Content-Type": "multipart/form-data" } });
   const data: any = res.data || {};
   const url = data.url || data.fileUrl || data.path || data.avatarUrl;
   if (!url) throw new Error("Risposta upload non valida: manca url.");
@@ -181,24 +165,20 @@ export async function uploadImage(file: File): Promise<{ url: string }> {
 }
 
 export async function uploadFile(file: File): Promise<{ url: string }> {
-  // endpoint generico per documenti
   try {
     const url = await uploadMultipart("/upload/file", "file", file);
     return { url };
   } catch {
-    // fallback: alcuni backend non hanno /upload/file
     const url = await uploadMultipart("/upload/image", "image", file);
     return { url };
   }
 }
 
 export async function uploadAudio(file: File): Promise<{ url: string }> {
-  // prova endpoint dedicato audio
   try {
     const url = await uploadMultipart("/upload/audio", "audio", file);
     return { url };
   } catch {
-    // fallback su upload file generico
     const up = await uploadFile(file);
     return { url: up.url };
   }
@@ -207,14 +187,12 @@ export async function uploadAudio(file: File): Promise<{ url: string }> {
 export async function uploadAvatar(file: File): Promise<{ ok?: boolean; avatarUrl: string; user?: User }> {
   const fd = new FormData();
   fd.append("avatar", file);
-  const res = await api.post("/upload/avatar", fd, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+  const res = await api.post("/upload/avatar", fd, { headers: { "Content-Type": "multipart/form-data" } });
   return res.data;
 }
 
 /* =======================
-   USERS SEARCH
+   SEARCH USERS
 ======================= */
 export async function searchUsers(params: {
   q?: string;
@@ -280,20 +258,43 @@ export async function fetchMessages(conversationId: number): Promise<Message[]> 
   return res.data;
 }
 
+/**
+ * ✅ INVIO ROBUSTO:
+ * 1) prova /conversations/:id/messages
+ * 2) se 404 prova /messages
+ * 3) manda body compatibile: content + text + message
+ */
 export async function sendMessage(
   conversationId: number,
   content: string,
   replyToId?: number | null
 ): Promise<Message> {
-  const res = await api.post<Message>(`/conversations/${conversationId}/messages`, {
+  const body = {
     content,
+    text: content,
+    message: content,
     replyToId: replyToId ?? null,
-  });
-  return res.data;
+    conversationId,
+  };
+
+  try {
+    const res = await api.post<Message>(`/conversations/${conversationId}/messages`, body);
+    return res.data;
+  } catch (e: any) {
+    const status = e?.response?.status;
+
+    // fallback endpoint
+    if (axios.isAxiosError(e) && status === 404) {
+      const res2 = await api.post<Message>(`/messages`, body);
+      return res2.data;
+    }
+
+    throw e;
+  }
 }
 
 export async function editMessage(messageId: number, content: string): Promise<Message> {
-  const res = await api.patch<Message>(`/messages/${messageId}`, { content });
+  const res = await api.patch<Message>(`/messages/${messageId}`, { content, text: content, message: content });
   return res.data;
 }
 
