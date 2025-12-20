@@ -1,16 +1,11 @@
-import axios from "axios";
+import axios, { AxiosInstance } from "axios";
 import { API_BASE_URL } from "./config";
 
-export const api = axios.create({
-  baseURL: API_BASE_URL,
-  timeout: 20000,
-});
-
-function normalizeToken(raw: string | null | undefined): string {
-  let t = String(raw || "").trim();
+/** ===== TOKEN HELPERS ===== */
+function normalizeToken(raw: unknown): string {
+  let t = String(raw ?? "").trim();
   if (!t) return "";
   if (t.toLowerCase().startsWith("bearer ")) t = t.slice(7).trim();
-  // rimuove eventuali doppi apici (capita se viene salvato come JSON string)
   if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
     t = t.slice(1, -1).trim();
   }
@@ -18,36 +13,49 @@ function normalizeToken(raw: string | null | undefined): string {
 }
 
 export function getAuthToken(): string {
-  // compatibilità: in alcuni pezzi del progetto è "token", in altri "authToken"
-  const t = localStorage.getItem("token") || localStorage.getItem("authToken") || localStorage.getItem("accessToken");
-  return normalizeToken(t);
+  const raw =
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("accessToken") ||
+    "";
+  return normalizeToken(raw);
 }
 
-/**
- * Imposta token in memoria + in localStorage.
- * Salviamo sia "token" sia "authToken" per evitare 401 dovuti a mismatch.
- */
+function applyTokenEverywhere(token: string) {
+  const clean = normalizeToken(token);
+
+  // axios globale
+  if (clean) axios.defaults.headers.common["Authorization"] = `Bearer ${clean}`;
+  else delete axios.defaults.headers.common["Authorization"];
+
+  // istanza api
+  if (clean) api.defaults.headers.common["Authorization"] = `Bearer ${clean}`;
+  else delete api.defaults.headers.common["Authorization"];
+}
+
 export function setAuthToken(token: string | null) {
   const clean = normalizeToken(token);
   if (clean) {
-    api.defaults.headers.common["Authorization"] = `Bearer ${clean}`;
     localStorage.setItem("token", clean);
     localStorage.setItem("authToken", clean);
   } else {
-    delete api.defaults.headers.common["Authorization"];
     localStorage.removeItem("token");
     localStorage.removeItem("authToken");
     localStorage.removeItem("accessToken");
   }
+  applyTokenEverywhere(clean);
 }
 
-/** Carica token dallo storage (utile all’avvio). */
 export function loadAuthTokenFromStorage() {
-  const clean = getAuthToken();
-  if (clean) api.defaults.headers.common["Authorization"] = `Bearer ${clean}`;
+  applyTokenEverywhere(getAuthToken());
 }
 
-// ✅ Interceptor: garantisce che TUTTE le richieste abbiano Authorization (se il token c’è)
+/** ===== AXIOS INSTANCE ===== */
+export const api: AxiosInstance = axios.create({
+  baseURL: (API_BASE_URL || "").replace(/\/+$/, ""),
+  timeout: 20000,
+});
+
 api.interceptors.request.use((config) => {
   const token = getAuthToken();
   if (token) {
@@ -57,13 +65,15 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+loadAuthTokenFromStorage();
+export default api;
+
+/** ===== TYPES ===== */
 export interface User {
   id: number;
   email: string;
   username: string;
   displayName: string;
-  // campi storici/variabili (non rompono anche se non esistono)
-  purpose?: string | null;
   state?: string | null;
   statusText?: string | null;
   city?: string | null;
@@ -87,21 +97,10 @@ export interface ConversationParticipant {
   user?: User;
 }
 
-export interface ConversationMessagePreview {
-  id: number;
-  content: string;
-  createdAt: string;
-  senderId: number;
-  conversationId: number;
-}
-
 export interface Conversation {
   id: number;
-  createdAt?: string;
-  updatedAt?: string;
   participants: ConversationParticipant[];
-  messages?: ConversationMessagePreview[];
-  lastMessage?: any; // alcuni backend inviano lastMessage
+  lastMessage?: Message | null;
 }
 
 export interface Message {
@@ -114,10 +113,9 @@ export interface Message {
   deletedAt?: string | null;
   replyToId?: number | null;
   sender?: User;
-  replyTo?: any;
 }
 
-/** AUTH */
+/** ===== AUTH ===== */
 export async function register(data: {
   email: string;
   password: string;
@@ -125,7 +123,6 @@ export async function register(data: {
   username: string;
   city?: string | null;
   area?: string | null;
-  purpose?: string; // compat (non usato se backend non lo richiede)
   termsAccepted?: boolean;
 }): Promise<AuthResponse> {
   const res = await api.post<AuthResponse>("/auth/register", data);
@@ -147,22 +144,61 @@ export async function patchMe(data: Partial<User>): Promise<User> {
   return res.data;
 }
 
-/** UPLOADS */
-export async function uploadAvatar(file: File): Promise<{ avatarUrl: string; user?: User }> {
+/** ===== UPLOAD HELPERS ===== */
+async function uploadMultipart(
+  path: string,
+  field: string,
+  file: File
+): Promise<string> {
+  const fd = new FormData();
+  fd.append(field, file);
+
+  const res = await api.post(path, fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
+  const data: any = res.data || {};
+  const url = data.url || data.fileUrl || data.path || data.avatarUrl;
+  if (!url) throw new Error("Risposta upload non valida (manca url).");
+  return String(url);
+}
+
+/**
+ * ✅ FIX NETLIFY:
+ * ChatWindow importa uploadImage/uploadAudio -> devono esistere qui.
+ */
+export async function uploadImage(file: File): Promise<{ url: string }> {
+  const url = await uploadMultipart("/upload/image", "image", file);
+  return { url };
+}
+
+export async function uploadAudio(file: File): Promise<{ url: string }> {
+  // prova endpoint dedicato, se non c'è fallback su /upload/file e poi /upload/image
+  try {
+    const url = await uploadMultipart("/upload/audio", "audio", file);
+    return { url };
+  } catch {
+    try {
+      const url = await uploadMultipart("/upload/file", "file", file);
+      return { url };
+    } catch {
+      const url = await uploadMultipart("/upload/image", "image", file);
+      return { url };
+    }
+  }
+}
+
+// compat: usata in alcune parti del progetto
+export async function uploadAvatar(file: File): Promise<{ ok?: boolean; avatarUrl: string; user?: User }> {
   const fd = new FormData();
   fd.append("avatar", file);
-  const res = await api.post("/upload/avatar", fd, { headers: { "Content-Type": "multipart/form-data" } });
+  const res = await api.post("/upload/avatar", fd, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
   return res.data;
 }
 
-export async function uploadChatImage(file: File): Promise<{ url: string }> {
-  const fd = new FormData();
-  fd.append("image", file);
-  const res = await api.post("/upload/image", fd, { headers: { "Content-Type": "multipart/form-data" } });
-  return res.data;
-}
-
-/** USERS SEARCH */
+/** ===== USERS SEARCH ===== */
 export async function searchUsers(params: {
   q?: string;
   city?: string;
@@ -175,7 +211,7 @@ export async function searchUsers(params: {
   return res.data;
 }
 
-/** FRIENDS */
+/** ===== FRIENDS ===== */
 export async function fetchFriends(): Promise<User[]> {
   const res = await api.get<User[]>("/friends");
   return res.data;
@@ -203,7 +239,7 @@ export async function declineFriendRequest(requestId: number): Promise<void> {
   await api.post(`/friends/requests/${requestId}/decline`);
 }
 
-/** CONVERSATIONS + MESSAGES */
+/** ===== CONVERSATIONS + MESSAGES ===== */
 export async function fetchConversations(): Promise<Conversation[]> {
   const res = await api.get<Conversation[]>("/conversations");
   return res.data;
@@ -224,7 +260,10 @@ export async function fetchMessages(conversationId: number): Promise<Message[]> 
 }
 
 export async function sendMessage(conversationId: number, content: string, replyToId?: number | null): Promise<Message> {
-  const res = await api.post<Message>(`/conversations/${conversationId}/messages`, { content, replyToId: replyToId ?? null });
+  const res = await api.post<Message>(`/conversations/${conversationId}/messages`, {
+    content,
+    replyToId: replyToId ?? null,
+  });
   return res.data;
 }
 

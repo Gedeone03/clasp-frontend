@@ -1,470 +1,263 @@
-// src/components/ui/ChatWindow.tsx
+import React, { useEffect, useRef, useState } from "react";
+import { uploadAudio, uploadImage } from "../../api";
 
-import React, { useEffect, useMemo, useRef, useState } from "react";
-import { Conversation, Message, User, uploadImage, uploadAudio } from "../../api";
-import { API_BASE_URL } from "../../config";
+type User = {
+  id: number;
+  username?: string;
+  displayName?: string;
+  avatarUrl?: string | null;
+};
 
-function StatusDot({ state }: { state: string }) {
-  const colors: Record<string, string> = {
-    DISPONIBILE: "#4CAF50",
-    OCCUPATO: "#F44336",
-    ASSENTE: "#FF9800",
-    OFFLINE: "#9E9E9E",
-    INVISIBILE: "#BDBDBD",
-    VISIBILE_A_TUTTI: "#2196F3",
-  };
-  return (
-    <span
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: "50%",
-        background: colors[state] || "#9E9E9E",
-        display: "inline-block",
-        marginRight: 6,
-        flex: "0 0 auto",
-      }}
-    />
-  );
-}
-
-function isImageUrl(content: string): boolean {
-  return /^(https?:\/\/|\/).+\.(png|jpe?g|gif|webp|avif|svg)$/i.test(content);
-}
-function isAudioUrl(content: string): boolean {
-  return /^(https?:\/\/|\/).+\.(mp3|ogg|wav|webm|m4a)$/i.test(content);
-}
-function formatTime(value?: any): string {
-  if (!value) return "";
-  try {
-    const d = typeof value === "string" ? new Date(value) : new Date(value);
-    if (Number.isNaN(d.getTime())) return "";
-    return new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(d);
-  } catch {
-    return "";
-  }
-}
-
-function useIsMobile(breakpointPx: number = 900) {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
-  useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [breakpointPx]);
-  return isMobile;
-}
-
-function AvatarBubble({ user, size = 34 }: { user: User | null; size?: number }) {
-  const border = "1px solid rgba(255,255,255,0.12)";
-  const shadow = "0 6px 18px rgba(0,0,0,0.35)";
-
-  if (user?.avatarUrl) {
-    return (
-      <img
-        src={user.avatarUrl}
-        alt="avatar"
-        style={{
-          width: size,
-          height: size,
-          borderRadius: "50%",
-          objectFit: "cover",
-          border,
-          boxShadow: shadow,
-          flex: "0 0 auto",
-        }}
-      />
-    );
-  }
-
-  const initials = (user?.displayName || user?.username || "?")
-    .split(" ")
-    .map((p) => p[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: "50%",
-        border,
-        boxShadow: shadow,
-        background: "linear-gradient(140deg, var(--tiko-purple), var(--tiko-blue))",
-        color: "#fff",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontWeight: 800,
-        fontSize: Math.max(12, Math.floor(size * 0.35)),
-        flex: "0 0 auto",
-        userSelect: "none",
-      }}
-    >
-      {initials}
-    </div>
-  );
-}
-
-type MessageLike = Message & {
-  createdAt?: string;
+type Msg = {
+  id: number;
+  content: string;
+  createdAt: string;
+  senderId: number;
   editedAt?: string | null;
   deletedAt?: string | null;
   replyToId?: number | null;
-  replyTo?: any | null;
-  sender?: any | null;
 };
 
-interface ChatWindowProps {
-  conversation: Conversation | null;
-  messages: MessageLike[];
-  currentUser: User;
-  typingUserId: number | null;
-  onSend: (content: string) => void;
-  onTyping: () => void;
-  onDeleteConversation?: () => void;
-
-  onBack?: () => void;
-  onOpenChats?: () => void;
-  onSendWithReply?: (content: string, replyToId: number | null) => void;
+function formatTime(dt: any): string {
+  const d = new Date(dt);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
 }
 
-export default function ChatWindow({
-  conversation,
-  messages,
-  currentUser,
-  typingUserId,
-  onSend,
-  onTyping,
-  onDeleteConversation,
-  onBack,
-  onOpenChats,
-  onSendWithReply,
-}: ChatWindowProps) {
-  const isMobile = useIsMobile(900);
-  const STAGGER = isMobile ? 25 : 14;
+function isImagePayload(s: string) {
+  return s.startsWith("__image__:");
+}
+function isAudioPayload(s: string) {
+  return s.startsWith("__audio__:");
+}
+function isFilePayload(s: string) {
+  return s.startsWith("__file__:");
+}
 
-  const [input, setInput] = useState("");
-  const [uploadingImage, setUploadingImage] = useState(false);
-  const [recording, setRecording] = useState(false);
-  const [uploadingAudio, setUploadingAudio] = useState(false);
+function parsePayload(content: string): { kind: "text" | "image" | "audio" | "file"; url?: string; name?: string; text?: string } {
+  const c = String(content || "");
+  if (isImagePayload(c)) return { kind: "image", url: c.slice(9).trim() };
+  if (isAudioPayload(c)) return { kind: "audio", url: c.slice(9).trim() };
+  if (isFilePayload(c)) {
+    const rest = c.slice(8).trim();
+    const [u, name] = rest.split("|");
+    return { kind: "file", url: (u || "").trim(), name: (name || "").trim() || undefined };
+  }
+  return { kind: "text", text: c };
+}
 
-  const [activeActionMsgId, setActiveActionMsgId] = useState<number | null>(null);
-  const [replyTo, setReplyTo] = useState<MessageLike | null>(null);
-  const [editingMsg, setEditingMsg] = useState<MessageLike | null>(null);
+export default function ChatWindow(props: any) {
+  const me: User | null = props?.me || props?.user || props?.currentUser || null;
+  const otherUser: User | null = props?.otherUser || props?.other || props?.peerUser || props?.friend || null;
 
-  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const messages: Msg[] = Array.isArray(props?.messages) ? props.messages : [];
+  const typingUserId: number | null = props?.typingUserId ?? null;
+
+  const onBack: (() => void) | undefined = props?.onBack;
+  const onSendWithReply: ((content: string, replyToId: number | null) => Promise<void> | void) | undefined = props?.onSendWithReply;
+  const onSend: ((content: string) => Promise<void> | void) | undefined = props?.onSend || props?.onSendMessage;
+
+  const listRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [messages.length]);
+
+  const [text, setText] = useState("");
+  const [err, setErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [replyTo, setReplyTo] = useState<Msg | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
-  const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
+  // audio recorder
+  const recorderRef = useRef<any>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const timerRef = useRef<number | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recMs, setRecMs] = useState(0);
 
-  useEffect(() => {
-    if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
-  }, [messages]);
+  async function doSend(content: string) {
+    const c = content.trim();
+    if (!c) return;
 
-  useEffect(() => {
-    setReplyTo(null);
-    setEditingMsg(null);
-    setActiveActionMsgId(null);
-    setInput("");
-  }, [conversation?.id]);
-
-  if (!conversation) return <div style={{ height: "100%", padding: 24 }}>Select a conversation</div>;
-
-  const other =
-    conversation.participants
-      .map((p: any) => p.user)
-      .find((u: any) => u && u.id !== currentUser.id) || null;
-
-  async function patchMessage(messageId: number, content: string) {
-    const token = localStorage.getItem("token");
-    const r = await fetch(`${baseUrl}/messages/${messageId}`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ content }),
-    });
-    if (!r.ok) throw new Error(`PATCH failed: ${r.status}`);
-    return await r.json();
-  }
-
-  async function deleteMessage(messageId: number) {
-    const token = localStorage.getItem("token");
-    const r = await fetch(`${baseUrl}/messages/${messageId}`, {
-      method: "DELETE",
-      headers: {
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-    });
-    if (!r.ok) throw new Error(`DELETE failed: ${r.status}`);
-    return await r.json();
-  }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const text = input.trim();
-    if (!text) return;
-
-    if (editingMsg) {
-      try {
-        await patchMessage(editingMsg.id, text);
-        setEditingMsg(null);
-        setInput("");
-      } catch (err) {
-        console.error(err);
-        alert("Edit failed");
-      }
+    if (!onSendWithReply && !onSend) {
+      setErr("Callback invio mancante (onSend / onSendWithReply).");
       return;
     }
 
-    if (replyTo && onSendWithReply) {
-      onSendWithReply(text, replyTo.id);
+    setErr(null);
+    setBusy(true);
+    try {
+      if (onSendWithReply) await onSendWithReply(c, replyTo?.id ?? null);
+      else if (onSend) await onSend(c);
+
+      setText("");
       setReplyTo(null);
-      setInput("");
+    } catch (e: any) {
+      setErr(e?.message || "Errore invio messaggio");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePickAnyFile(file: File) {
+    setErr(null);
+    setBusy(true);
+    try {
+      const mime = file.type || "";
+
+      // immagini -> /upload/image
+      if (mime.startsWith("image/")) {
+        const up = await uploadImage(file);
+        await doSend(`__image__:${up.url}`);
+        return;
+      }
+
+      // audio -> /upload/audio (fallback interno in api.ts)
+      if (mime.startsWith("audio/")) {
+        const up = await uploadAudio(file);
+        await doSend(`__audio__:${up.url}`);
+        return;
+      }
+
+      // altri file: usiamo uploadAudio fallback (che prova /upload/file e /upload/image)
+      const up = await uploadAudio(file);
+      await doSend(`__file__:${up.url}|${file.name || "file"}`);
+    } catch (e: any) {
+      setErr(e?.message || "Errore invio file/audio");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startRecording() {
+    setErr(null);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErr("Registrazione non supportata su questo browser.");
       return;
     }
-
-    onSend(text);
-    setReplyTo(null);
-    setInput("");
-  };
-
-  const handleAttachImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
 
     try {
-      setUploadingImage(true);
-      const url = await uploadImage(file);
-      if (replyTo && onSendWithReply) {
-        onSendWithReply(url, replyTo.id);
-        setReplyTo(null);
-      } else {
-        onSend(url);
-        setReplyTo(null);
-      }
-    } catch {
-      alert("Image upload error");
-    } finally {
-      setUploadingImage(false);
-      e.target.value = "";
-    }
-  };
-
-  const toggleRecording = async () => {
-    if (!recording) {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
+      const MediaRecorderAny = (window as any).MediaRecorder;
+      if (!MediaRecorderAny) {
+        stream.getTracks().forEach((t: any) => t.stop());
+        setErr("MediaRecorder non disponibile.");
+        return;
+      }
 
-      recorder.ondataavailable = (ev) => {
-        if (ev.data.size > 0) audioChunksRef.current.push(ev.data);
+      chunksRef.current = [];
+      setRecMs(0);
+
+      const rec = new MediaRecorderAny(stream);
+      recorderRef.current = rec;
+
+      rec.ondataavailable = (e: any) => {
+        if (e?.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      recorder.onstop = async () => {
+      rec.onstop = async () => {
         try {
-          setUploadingAudio(true);
-          const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-          const file = new File([blob], "audio.webm", { type: "audio/webm" });
-          const url = await uploadAudio(file);
-
-          if (replyTo && onSendWithReply) {
-            onSendWithReply(url, replyTo.id);
-            setReplyTo(null);
-          } else {
-            onSend(url);
-            setReplyTo(null);
-          }
-        } catch {
-          alert("Audio send error");
-        } finally {
-          setUploadingAudio(false);
-          stream.getTracks().forEach((t) => t.stop());
+          stream.getTracks().forEach((t: any) => t.stop());
+          const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+          const ext = String(rec.mimeType || "").includes("ogg") ? "ogg" : "webm";
+          const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: blob.type || "audio/webm" });
+          await handlePickAnyFile(file);
+        } catch (e: any) {
+          setErr(e?.message || "Errore invio audio");
         }
       };
 
-      mediaRecorderRef.current = recorder;
-      recorder.start();
+      rec.start(250);
       setRecording(true);
-    } else {
-      mediaRecorderRef.current?.stop();
-      setRecording(false);
+
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      timerRef.current = window.setInterval(() => setRecMs((p) => p + 250), 250);
+    } catch (e: any) {
+      setErr(e?.message || "Permesso microfono negato.");
     }
-  };
+  }
 
-  const renderQuoted = (msg: MessageLike) => {
-    if (!msg.replyTo) return null;
-    const rt = msg.replyTo;
-    const rtText = rt.deletedAt ? "Message deleted" : (rt.content || "");
-    const rtName = rt.sender?.displayName || "User";
-    return (
-      <div style={{ borderLeft: "3px solid rgba(255,255,255,0.25)", paddingLeft: 8, marginBottom: 6, opacity: 0.9, fontSize: 12 }}>
-        <div style={{ fontWeight: 800, marginBottom: 2 }}>{rtName}</div>
-        <div style={{ color: "rgba(255,255,255,0.85)" }}>{rtText.slice(0, 120)}</div>
-      </div>
-    );
-  };
+  function stopRecording() {
+    try {
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      timerRef.current = null;
 
-  const renderContent = (m: MessageLike) => {
-    if (m.deletedAt) return <div style={{ fontStyle: "italic", opacity: 0.85 }}>Message deleted</div>;
-    if (isImageUrl(m.content)) return <img src={m.content} alt="img" style={{ maxWidth: "min(320px, 70vw)", width: "100%", borderRadius: 12, display: "block" }} />;
-    if (isAudioUrl(m.content)) return <audio controls src={m.content} style={{ width: "min(320px, 70vw)" }} />;
-    return <div style={{ lineHeight: 1.35, wordBreak: "break-word" }}>{m.content}</div>;
-  };
+      const rec = recorderRef.current;
+      recorderRef.current = null;
 
-  const headerBtn: React.CSSProperties = {
-    border: "1px solid #444",
-    background: "transparent",
+      setRecording(false);
+      if (rec && rec.state !== "inactive") rec.stop();
+    } catch (e: any) {
+      setErr(e?.message || "Errore stop registrazione");
+    }
+  }
+
+  const iconBtn: React.CSSProperties = {
+    width: 42,
+    height: 42,
     borderRadius: 12,
-    padding: isMobile ? "6px 8px" : "6px 10px",
+    border: "1px solid #2a2a2a",
+    background: "var(--tiko-bg-dark)",
+    color: "var(--tiko-text)",
+    fontWeight: 950,
     cursor: "pointer",
-    whiteSpace: "nowrap",
-    flex: "0 0 auto",
   };
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* HEADER: grid = no overlap */}
-      <div
-        style={{
-          padding: 12,
-          borderBottom: "1px solid #222",
-          background: "var(--tiko-bg-gray)",
-          display: "grid",
-          gridTemplateColumns: "1fr auto",
-          alignItems: "center",
-          gap: 10,
-        }}
-      >
-        {/* Left side: title + Chats (accanto al nome) */}
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
+      <div style={{ padding: "10px 12px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "var(--tiko-bg-card)" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
           {onBack && (
-            <button type="button" onClick={onBack} style={{ ...headerBtn, fontWeight: 900 }} aria-label="Back">
+            <button type="button" style={iconBtn} onClick={onBack} aria-label="Indietro">
               ←
             </button>
           )}
-
-          <StatusDot state={other?.state || "OFFLINE"} />
-
-          <strong
-            style={{
-              minWidth: 0,
-              flex: 1,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {other?.displayName || "Conversation"}
-          </strong>
-
-          {onOpenChats && (
-            <button type="button" onClick={onOpenChats} style={headerBtn} title="Switch chat">
-              Chats
-            </button>
-          )}
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontWeight: 950, color: "var(--tiko-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              {otherUser?.displayName || otherUser?.username || "Chat"}
+            </div>
+            {typingUserId ? <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>sta scrivendo…</div> : null}
+          </div>
         </div>
-
-        {/* Right side: Delete only */}
-        {onDeleteConversation ? (
-          <button type="button" onClick={onDeleteConversation} style={headerBtn} title="Delete chat">
-            Delete
-          </button>
-        ) : (
-          <div />
-        )}
       </div>
 
-      {typingUserId && typingUserId !== currentUser.id && (
-        <div style={{ padding: "6px 12px", fontSize: 12, color: "var(--tiko-blue)", background: "var(--tiko-bg-gray)" }}>
-          Typing…
-        </div>
-      )}
-
-      {/* MESSAGES */}
-      <div ref={scrollRef} style={{ flex: 1, padding: 16, overflowY: "auto", background: "var(--tiko-bg-dark)", minHeight: 0 }}>
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12, background: "var(--tiko-bg-dark)" }}>
         {messages.map((m) => {
-          const mine = m.senderId === currentUser.id;
-          const senderUser: User | null = mine ? currentUser : ((m as any).sender as any) || other || null;
-
-          const timeStr = formatTime((m as any).createdAt);
-          const ticks = mine ? "\u2713\u2713" : "";
-
-          const rowPaddingStyle = mine ? { marginLeft: `${STAGGER}%`, marginRight: 6 } : { marginRight: `${STAGGER}%`, marginLeft: 6 };
-          const showActions = activeActionMsgId === m.id;
+          const mine = me?.id && m.senderId === me.id;
+          const p = parsePayload(String(m.content ?? ""));
+          const deleted = !!m.deletedAt;
 
           return (
-            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 10, ...rowPaddingStyle }}>
-              <div style={{ display: "flex", flexDirection: mine ? "row-reverse" : "row", alignItems: "flex-end", gap: 10, maxWidth: "100%" }}>
-                <AvatarBubble user={senderUser} size={34} />
+            <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 10 }}>
+              <div style={{ maxWidth: "78%", padding: "10px 12px", borderRadius: 16, border: "1px solid #2a2a2a", background: mine ? "rgba(122,41,255,0.18)" : "rgba(58,190,255,0.12)", color: "var(--tiko-text)" }}>
+                {deleted ? (
+                  <i style={{ color: "var(--tiko-text-dim)" }}>Messaggio eliminato</i>
+                ) : p.kind === "text" ? (
+                  p.text
+                ) : p.kind === "image" ? (
+                  <a href={p.url} target="_blank" rel="noreferrer">
+                    <img src={p.url} alt="img" style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #333" }} />
+                  </a>
+                ) : p.kind === "audio" ? (
+                  <audio controls src={p.url} style={{ width: "100%" }} />
+                ) : (
+                  <a href={p.url} target="_blank" rel="noreferrer" style={{ color: "#3ABEFF", fontWeight: 900 }}>
+                    Scarica file{p.name ? `: ${p.name}` : ""}
+                  </a>
+                )}
 
-                <div style={{ display: "flex", flexDirection: "column", alignItems: mine ? "flex-end" : "flex-start" }}>
-                  <div
-                    onClick={() => setActiveActionMsgId((prev) => (prev === m.id ? null : m.id))}
-                    style={{
-                      maxWidth: "72vw",
-                      width: "fit-content",
-                      background: mine ? "var(--tiko-purple)" : "var(--tiko-bg-card)",
-                      color: mine ? "#fff" : "var(--tiko-text)",
-                      padding: 10,
-                      borderRadius: 16,
-                      border: mine ? "1px solid rgba(255,255,255,0.10)" : "1px solid #2a2a2a",
-                      boxShadow: mine ? "0 10px 24px rgba(122,41,255,0.28)" : "0 10px 24px rgba(0,0,0,0.28)",
-                      cursor: "pointer",
-                      position: "relative",
-                    }}
+                <div style={{ marginTop: 6, fontSize: 11, color: "var(--tiko-text-dim)", display: "flex", justifyContent: "space-between", gap: 10 }}>
+                  <span>{formatTime(m.createdAt)}</span>
+                  <button
+                    type="button"
+                    onClick={() => setReplyTo(m)}
+                    style={{ background: "transparent", border: "none", color: "#3ABEFF", cursor: "pointer", fontWeight: 900, padding: 0 }}
                   >
-                    {!mine && <div style={{ fontSize: 11, color: "var(--tiko-text-dim)", marginBottom: 4 }}>{senderUser?.displayName || "User"}</div>}
-                    {renderQuoted(m)}
-                    {renderContent(m)}
-                    {m.editedAt && !m.deletedAt && <div style={{ marginTop: 6, fontSize: 11, opacity: 0.85 }}>(edited)</div>}
-                  </div>
-
-                  {showActions && (
-                    <div style={{ display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" }}>
-                      <button type="button" onClick={() => { setReplyTo(m); setEditingMsg(null); setActiveActionMsgId(null); }} style={{ fontSize: 12 }}>
-                        Reply
-                      </button>
-
-                      {mine && !m.deletedAt && (
-                        <>
-                          <button type="button" onClick={() => { setEditingMsg(m); setReplyTo(null); setInput(m.content || ""); setActiveActionMsgId(null); }} style={{ fontSize: 12 }}>
-                            Edit
-                          </button>
-                          <button
-                            type="button"
-                            onClick={async () => {
-                              const ok = window.confirm("Delete this message?");
-                              if (!ok) return;
-                              try {
-                                await deleteMessage(m.id);
-                                setActiveActionMsgId(null);
-                              } catch (e) {
-                                console.error(e);
-                                alert("Delete failed");
-                              }
-                            }}
-                            style={{ fontSize: 12, background: "var(--tiko-magenta)" }}
-                          >
-                            Delete
-                          </button>
-                        </>
-                      )}
-                    </div>
-                  )}
-
-                  {(timeStr || ticks) && (
-                    <div style={{ marginTop: 4, fontSize: 11, color: "var(--tiko-text-dim)", display: "flex", gap: 8, alignItems: "center" }}>
-                      {timeStr && <span>{timeStr}</span>}
-                      {ticks && <span style={{ letterSpacing: 1 }}>{ticks}</span>}
-                    </div>
-                  )}
+                    Rispondi
+                  </button>
                 </div>
               </div>
             </div>
@@ -472,34 +265,92 @@ export default function ChatWindow({
         })}
       </div>
 
-      {(replyTo || editingMsg) && (
-        <div style={{ padding: 10, borderTop: "1px solid #222", background: "var(--tiko-bg-gray)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-          <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-            {replyTo && (
-              <>
-                <strong>Replying to:</strong>{" "}
-                {(replyTo as any)?.sender?.displayName || (other?.displayName ?? "User")} —{" "}
-                {(replyTo.deletedAt ? "Message deleted" : replyTo.content || "").slice(0, 80)}
-              </>
-            )}
-            {editingMsg && <strong>Editing message</strong>}
+      {/* ✅ BARRA CHAT RIPRISTINATA (web+mobile) */}
+      <div style={{ borderTop: "1px solid #222", background: "var(--tiko-bg-card)", padding: 10, position: "sticky", bottom: 0 }}>
+        {err && (
+          <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 850 }}>
+            {err}
           </div>
-          <button type="button" onClick={() => { setReplyTo(null); setEditingMsg(null); setInput(""); }} style={{ fontSize: 12 }}>
-            X
+        )}
+
+        {replyTo && (
+          <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 12, border: "1px solid #2a2a2a", background: "rgba(255,255,255,0.03)", display: "flex", justifyContent: "space-between", gap: 10 }}>
+            <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+              Risposta a <strong>#{replyTo.id}</strong>
+            </div>
+            <button type="button" onClick={() => setReplyTo(null)} style={{ background: "transparent", border: "none", color: "#ff3b30", fontWeight: 950, cursor: "pointer" }}>
+              Annulla
+            </button>
+          </div>
+        )}
+
+        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+          <button type="button" style={{ ...iconBtn, opacity: busy ? 0.7 : 1 }} onClick={() => fileInputRef.current?.click()} disabled={busy} title="Invia file">
+            📎
+          </button>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) handlePickAnyFile(f);
+              e.currentTarget.value = "";
+            }}
+          />
+
+          <button
+            type="button"
+            style={{
+              ...iconBtn,
+              background: recording ? "rgba(255,59,48,0.18)" : "var(--tiko-bg-dark)",
+              borderColor: recording ? "#ff3b30" : "#2a2a2a",
+            }}
+            onClick={() => (recording ? stopRecording() : startRecording())}
+            disabled={busy}
+            title={recording ? "Stop registrazione" : "Registra audio"}
+          >
+            🎙️
+          </button>
+
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            placeholder={recording ? `Registrazione… ${(recMs / 1000).toFixed(1)}s` : "Scrivi un messaggio…"}
+            style={{
+              flex: 1,
+              resize: "none",
+              minHeight: 42,
+              maxHeight: 120,
+              padding: "10px 10px",
+              borderRadius: 12,
+              border: "1px solid #2a2a2a",
+              background: "var(--tiko-bg-dark)",
+              color: "var(--tiko-text)",
+              outline: "none",
+              fontSize: 14,
+              lineHeight: 1.25,
+            }}
+            disabled={busy || recording}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                doSend(text);
+              }
+            }}
+          />
+
+          <button
+            type="button"
+            style={{ minWidth: 80, height: 42, borderRadius: 12, border: "1px solid #2a2a2a", background: "#7A29FF", color: "#fff", fontWeight: 950, cursor: "pointer", opacity: busy ? 0.7 : 1 }}
+            disabled={busy || recording || !text.trim()}
+            onClick={() => doSend(text)}
+          >
+            {busy ? "…" : "Invia"}
           </button>
         </div>
-      )}
-
-      {/* INPUT */}
-      <form onSubmit={handleSubmit} style={{ borderTop: "1px solid #222", padding: 10, display: "flex", gap: 8, background: "var(--tiko-bg-gray)", alignItems: "center" }}>
-        <button type="button" onClick={() => fileInputRef.current?.click()}>+</button>
-        <input ref={fileInputRef} type="file" accept="image/*" style={{ display: "none" }} onChange={handleAttachImage} />
-        <button type="button" onClick={toggleRecording}>{recording ? "Stop" : "Audio"}</button>
-        <input value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={onTyping} placeholder={editingMsg ? "Edit message…" : replyTo ? "Reply…" : "Type a message…"} style={{ flex: 1, minWidth: 0 }} />
-        <button type="submit" disabled={!input.trim()}>{editingMsg ? "Save" : "Send"}</button>
-      </form>
-
-      {(uploadingImage || uploadingAudio) && <div style={{ fontSize: 12, padding: 6 }}>Sending…</div>}
+      </div>
     </div>
   );
 }
