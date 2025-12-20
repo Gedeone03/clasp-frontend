@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link, NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { API_BASE_URL } from "../../config";
 import { useAuth } from "../../AuthContext";
 
@@ -10,8 +10,7 @@ function useIsMobile(breakpointPx = 1100) {
       typeof window.matchMedia === "function" &&
       window.matchMedia("(pointer: coarse)").matches;
 
-    const ua =
-      typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
     const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
 
     return coarse || uaMobile || window.innerWidth < breakpointPx;
@@ -63,6 +62,7 @@ const STATE_UI: Record<string, { label: string; color: string }> = {
   OFFLINE: { label: "Offline", color: "#95a5a6" },
   INVISIBILE: { label: "Invisibile", color: "#9b59b6" },
   VISIBILE_A_TUTTI: { label: "Visibile a tutti", color: "#3ABEFF" },
+
   ONLINE: { label: "Disponibile", color: "#2ecc71" },
   AWAY: { label: "Assente", color: "#f39c12" },
 };
@@ -83,81 +83,30 @@ function initials(name?: string | null) {
   return parts.map((p) => p[0]?.toUpperCase()).join("");
 }
 
+// ✅ Fix avatar URL + mixed content
 function resolveUrlMaybeBackend(url?: string | null) {
   if (!url) return "";
-  const t = url.trim();
+  let t = url.trim();
   if (!t) return "";
-  if (t.startsWith("http://") || t.startsWith("https://")) return t;
-  if (t.startsWith("/")) return `${API_BASE_URL.replace(/\/+$/, "")}${t}`;
-  return t;
-}
 
-function Badge({ n }: { n: number }) {
-  if (!n || n <= 0) return null;
-  return (
-    <span
-      style={{
-        marginLeft: 8,
-        minWidth: 18,
-        height: 18,
-        padding: "0 6px",
-        borderRadius: 999,
-        background: "#ff3b30",
-        color: "#fff",
-        fontSize: 12,
-        fontWeight: 900,
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-      }}
-      title="Notifiche"
-    >
-      {n > 99 ? "99+" : n}
-    </span>
-  );
+  // se è relativo, aggiungi base backend
+  if (t.startsWith("/")) t = `${API_BASE_URL.replace(/\/+$/, "")}${t}`;
+
+  // se siamo su https e arriva http, forza https (browser blocca spesso immagini http)
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && t.startsWith("http://")) {
+    t = t.replace(/^http:\/\//i, "https://");
+  }
+
+  return t;
 }
 
 export default function Sidebar() {
   const isMobile = useIsMobile(1100);
-  const { user } = useAuth();
+  const { user, logout } = useAuth();
+  const nav = useNavigate();
   const location = useLocation();
 
-  const baseUrl = useMemo(() => API_BASE_URL.replace(/\/+$/, ""), []);
   const [drawerOpen, setDrawerOpen] = useState(false);
-
-  // friend requests badge
-  const [pendingRequests, setPendingRequests] = useState(0);
-
-  const fetchPendingRequests = async () => {
-    try {
-      const token = localStorage.getItem("token") || "";
-      if (!token) {
-        setPendingRequests(0);
-        return;
-      }
-
-      const r = await fetch(`${baseUrl}/friends/requests/received`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (!r.ok) return;
-
-      const data = await r.json();
-      const count = Array.isArray(data) ? data.length : 0;
-      setPendingRequests(count);
-    } catch {
-      // silenzioso
-    }
-  };
-
-  useEffect(() => {
-    fetchPendingRequests();
-    const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") fetchPendingRequests();
-    }, 15000);
-    return () => window.clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (drawerOpen) setDrawerOpen(false);
@@ -257,13 +206,6 @@ export default function Sidebar() {
         <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           @{user?.username || "—"}
         </div>
-
-        <div style={{ marginTop: 6, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-          Stato: <strong style={{ color: "var(--tiko-text)" }}>{stateLabel((user as any)?.state)}</strong>
-        </div>
-        <div style={{ marginTop: 4, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-          Mood: <strong style={{ color: "var(--tiko-text)" }}>{(user as any)?.mood || "—"}</strong>
-        </div>
       </div>
     </div>
   );
@@ -276,7 +218,6 @@ export default function Sidebar() {
 
       <NavLink to="/friends" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Amici</span>
-        <Badge n={pendingRequests} />
       </NavLink>
 
       <NavLink to="/profile" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
@@ -294,22 +235,40 @@ export default function Sidebar() {
       <NavLink to="/privacy" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Privacy</span>
       </NavLink>
+
+      {/* ✅ LOGOUT */}
+      <button
+        type="button"
+        onClick={() => {
+          logout();
+          nav("/auth", { replace: true });
+        }}
+        style={{
+          ...baseItemStyle,
+          background: "transparent",
+          cursor: "pointer",
+          color: "#ff6b6b",
+          borderColor: "#3a1f1f",
+          justifyContent: "center",
+        }}
+      >
+        Logout
+      </button>
     </div>
   );
 
   const MobileNav = (
     <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 12 }}>
-      <Link to="/?view=chats" style={{ ...baseItemStyle, background: location.pathname === "/" ? activeBg : "transparent" }}>
+      <Link to="/?view=chats" style={baseItemStyle}>
         <span>Chat</span>
       </Link>
 
-      <Link to="/?view=search" style={{ ...baseItemStyle, background: location.pathname === "/" ? "transparent" : "transparent" }}>
+      <Link to="/?view=search" style={baseItemStyle}>
         <span>Cerca</span>
       </Link>
 
       <NavLink to="/friends" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Amici</span>
-        <Badge n={pendingRequests} />
       </NavLink>
 
       <NavLink to="/profile" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
@@ -327,6 +286,25 @@ export default function Sidebar() {
       <NavLink to="/privacy" style={({ isActive }) => ({ ...baseItemStyle, background: isActive ? activeBg : "transparent" })}>
         <span>Privacy</span>
       </NavLink>
+
+      {/* ✅ LOGOUT mobile */}
+      <button
+        type="button"
+        onClick={() => {
+          logout();
+          nav("/auth", { replace: true });
+        }}
+        style={{
+          ...baseItemStyle,
+          background: "transparent",
+          cursor: "pointer",
+          color: "#ff6b6b",
+          borderColor: "#3a1f1f",
+          justifyContent: "center",
+        }}
+      >
+        Logout
+      </button>
     </div>
   );
 
@@ -369,37 +347,14 @@ export default function Sidebar() {
             <div style={{ fontWeight: 950, letterSpacing: 0.2 }}>Clasp</div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {pendingRequests > 0 && (
-              <div
-                style={{
-                  minWidth: 22,
-                  height: 22,
-                  padding: "0 7px",
-                  borderRadius: 999,
-                  background: "#ff3b30",
-                  color: "#fff",
-                  fontSize: 12,
-                  fontWeight: 950,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                }}
-                title="Richieste amicizia"
-              >
-                {pendingRequests > 99 ? "99+" : pendingRequests}
+          <div style={{ width: 28, height: 28, borderRadius: 999, overflow: "hidden", border: "1px solid #333" }}>
+            {avatarUrl ? (
+              <img src={avatarUrl} alt="avatar" width={28} height={28} style={{ width: 28, height: 28, objectFit: "cover" }} />
+            ) : (
+              <div style={{ width: 28, height: 28, background: "#1f1f26", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 950, fontSize: 12 }}>
+                {initials(user?.displayName)}
               </div>
             )}
-
-            <div style={{ width: 28, height: 28, borderRadius: 999, overflow: "hidden", border: "1px solid #333" }}>
-              {avatarUrl ? (
-                <img src={avatarUrl} alt="avatar" width={28} height={28} style={{ width: 28, height: 28, objectFit: "cover" }} />
-              ) : (
-                <div style={{ width: 28, height: 28, background: "#1f1f26", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 950, fontSize: 12 }}>
-                  {initials(user?.displayName)}
-                </div>
-              )}
-            </div>
           </div>
         </div>
 
@@ -445,7 +400,6 @@ export default function Sidebar() {
     );
   }
 
-  // desktop
   return (
     <div style={{ width: 260, padding: 12, borderRight: "1px solid #222", background: "var(--tiko-bg-dark)", display: "flex", flexDirection: "column", gap: 10, overflow: "hidden" }}>
       {HeaderBlock}
