@@ -1,228 +1,345 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import Sidebar from "../components/ui/Sidebar";
 import { API_BASE_URL } from "../config";
 import { useAuth } from "../AuthContext";
 
-function useIsMobile(breakpointPx: number = 900) {
-  const [m, setM] = useState(() => (typeof window !== "undefined" ? window.innerWidth < breakpointPx : false));
-  useEffect(() => {
-    const on = () => setM(window.innerWidth < breakpointPx);
-    window.addEventListener("resize", on);
-    return () => window.removeEventListener("resize", on);
-  }, [breakpointPx]);
-  return m;
+type StateKey = "DISPONIBILE" | "OCCUPATO" | "ASSENTE" | "OFFLINE" | "INVISIBILE" | "VISIBILE_A_TUTTI" | "";
+type MoodKey = "FELICE" | "TRISTE" | "RILASSATO" | "ANSIOSO" | "ENTUSIASTA" | "ARRABBIATO" | "SOLO" | "";
+
+function getToken(): string {
+  let t = localStorage.getItem("token") || "";
+  if (t.toLowerCase().startsWith("bearer ")) t = t.slice(7).trim();
+  return t.trim();
 }
 
-function resolveAvatar(url?: string | null): string | null {
-  if (!url) return null;
-  if (url.startsWith("http://") || url.startsWith("https://")) return url;
-  return `${API_BASE_URL}${url.startsWith("/") ? "" : "/"}${url}`;
+function resolveUrl(url?: string | null) {
+  if (!url) return "";
+  let t = url.trim();
+  if (!t) return "";
+  if (t.startsWith("/")) t = `${API_BASE_URL.replace(/\/+$/, "")}${t}`;
+  if (typeof window !== "undefined" && window.location.protocol === "https:" && t.startsWith("http://")) {
+    t = t.replace(/^http:\/\//i, "https://");
+  }
+  return t;
+}
+
+async function apiFetch(path: string, init?: RequestInit) {
+  const token = getToken();
+  const headers: any = { ...(init?.headers || {}) };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  const res = await fetch(`${API_BASE_URL.replace(/\/+$/, "")}${path}`, {
+    ...init,
+    headers,
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(txt || `HTTP ${res.status}`);
+  }
+  return res;
 }
 
 export default function ProfilePage() {
-  const nav = useNavigate();
-  const isMobile = useIsMobile(900);
-  const { user, refreshMe } = useAuth();
+  const auth = useAuth() as any;
+  const user = auth.user as any;
 
-  const [saving, setSaving] = useState(false);
+  const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
 
-  // campi editabili (se il tuo backend li supporta)
   const [displayName, setDisplayName] = useState("");
   const [statusText, setStatusText] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
-  const [mood, setMood] = useState("");
-  const [state, setState] = useState("");
+  const [state, setState] = useState<StateKey>("");
+  const [mood, setMood] = useState<MoodKey>("");
 
-  const title = useMemo(() => "Profilo", []);
+  const avatarUrl = useMemo(() => resolveUrl(user?.avatarUrl), [user?.avatarUrl]);
+
+  const STATE_OPTIONS: { value: StateKey; label: string }[] = [
+    { value: "", label: "—" },
+    { value: "DISPONIBILE", label: "Disponibile" },
+    { value: "OCCUPATO", label: "Occupato" },
+    { value: "ASSENTE", label: "Assente" },
+    { value: "OFFLINE", label: "Offline" },
+    { value: "INVISIBILE", label: "Invisibile" },
+    { value: "VISIBILE_A_TUTTI", label: "Visibile a tutti" },
+  ];
+
+  const MOOD_OPTIONS: { value: MoodKey; label: string }[] = [
+    { value: "", label: "—" },
+    { value: "FELICE", label: "Felice" },
+    { value: "TRISTE", label: "Triste" },
+    { value: "RILASSATO", label: "Rilassato" },
+    { value: "ANSIOSO", label: "Ansioso" },
+    { value: "ENTUSIASTA", label: "Entusiasta" },
+    { value: "ARRABBIATO", label: "Arrabbiato" },
+    { value: "SOLO", label: "Solo" },
+  ];
+
+  function applyUserToForm(u: any) {
+    setDisplayName(u?.displayName || "");
+    setStatusText(u?.statusText || "");
+    setCity(u?.city || "");
+    setArea(u?.area || "");
+    setState((u?.state as StateKey) || "");
+    setMood((u?.mood as MoodKey) || "");
+  }
+
+  function updateAuthUser(nextUser: any) {
+    // prova ad aggiornare il context se il metodo esiste
+    try { auth.setUser?.(nextUser); } catch {}
+    try { auth.updateUser?.(nextUser); } catch {}
+    // fallback: salva in localStorage se l’app lo usa
+    try { localStorage.setItem("user", JSON.stringify(nextUser)); } catch {}
+  }
 
   useEffect(() => {
-    setDisplayName(user?.displayName || "");
-    setStatusText((user as any)?.statusText || "");
-    setCity((user as any)?.city || "");
-    setArea((user as any)?.area || "");
-    setMood((user as any)?.mood || "");
-    setState((user as any)?.state || "");
-  }, [user]);
+    // se non c’è token, la profile non può funzionare
+    const token = getToken();
+    if (!token) {
+      setMsg("Non autenticato. Effettua il login.");
+      return;
+    }
 
-  const wrapStyle: React.CSSProperties = isMobile
-    ? { position: "fixed", inset: 0, zIndex: 9999, background: "var(--tiko-bg-dark)", overflowY: "auto" }
-    : { minHeight: "100%" };
+    let alive = true;
+    (async () => {
+      try {
+        const res = await apiFetch("/me");
+        const me = await res.json();
+        if (!alive) return;
 
-  const cardStyle: React.CSSProperties = {
-    background: "var(--tiko-bg-card)",
-    border: "1px solid #222",
-    borderRadius: 14,
-    padding: 12,
+        updateAuthUser(me);
+        applyUserToForm(me);
+      } catch (e: any) {
+        if (!alive) return;
+        setMsg("Errore caricamento profilo: " + (e?.message || "errore"));
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function onSave() {
+    setMsg(null);
+    setBusy(true);
+    try {
+      const body: any = {
+        displayName: displayName.trim(),
+        statusText: statusText.trim() || null,
+        city: city.trim() || null,
+        area: area.trim() || null,
+        state: state || "OFFLINE",
+        mood: mood || null,
+      };
+
+      const res = await apiFetch("/me", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const updated = await res.json();
+      updateAuthUser(updated);
+      applyUserToForm(updated);
+      setMsg("Salvato.");
+    } catch (e: any) {
+      setMsg("Errore salvataggio: " + (e?.message || "errore"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onUploadAvatar(file: File) {
+    setMsg(null);
+    setBusy(true);
+    try {
+      const fd = new FormData();
+      fd.append("avatar", file);
+
+      const token = getToken();
+      const res = await fetch(`${API_BASE_URL.replace(/\/+$/, "")}/upload/avatar`, {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+        body: fd,
+      });
+
+      if (!res.ok) {
+        const txt = await res.text().catch(() => "");
+        throw new Error(txt || `HTTP ${res.status}`);
+      }
+
+      const data = await res.json();
+      // backend può rispondere { user } o solo avatarUrl
+      const nextUser = data?.user ? data.user : { ...(user || {}), avatarUrl: data.avatarUrl };
+      updateAuthUser(nextUser);
+
+      // ricarica form
+      applyUserToForm(nextUser);
+      setMsg("Avatar aggiornato.");
+    } catch (e: any) {
+      setMsg("Errore upload avatar: " + (e?.message || "errore"));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pageWrap: React.CSSProperties = {
+    height: "100vh",
+    display: "flex",
+    overflow: "hidden",
+    background: "var(--tiko-bg-dark)",
   };
 
-  const inputStyle: React.CSSProperties = {
+  const content: React.CSSProperties = {
+    flex: 1,
+    minWidth: 0,
+    overflowY: "auto",
+    padding: 14,
+  };
+
+  const card: React.CSSProperties = {
+    maxWidth: 820,
+    margin: "0 auto",
+    background: "var(--tiko-bg-card)",
+    border: "1px solid #222",
+    borderRadius: 18,
+    padding: 14,
+  };
+
+  const input: React.CSSProperties = {
     width: "100%",
-    padding: "10px 12px",
+    padding: "12px 12px",
     borderRadius: 12,
     border: "1px solid #2a2a2a",
     background: "var(--tiko-bg-dark)",
     color: "var(--tiko-text)",
+    outline: "none",
+    fontSize: 14,
   };
 
-  async function saveProfile() {
-    setErr(null);
-    setMsg(null);
-    setSaving(true);
-    try {
-      const token = localStorage.getItem("token") || localStorage.getItem("authToken") || "";
-      const t = token.toLowerCase().startsWith("bearer ") ? token.slice(7).trim() : token.trim();
+  const row: React.CSSProperties = { display: "flex", gap: 12, flexWrap: "wrap" };
 
-      const res = await fetch(`${API_BASE_URL}/me`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          ...(t ? { Authorization: `Bearer ${t}` } : {}),
-        },
-        body: JSON.stringify({
-          displayName,
-          statusText,
-          city: city || null,
-          area: area || null,
-          mood: mood || null,
-          state: state || null,
-        }),
-      });
-
-      const data = await res.json().catch(() => null);
-
-      if (!res.ok) throw new Error(data?.message || data?.error || `HTTP ${res.status}`);
-
-      setMsg("Profilo aggiornato.");
-      await refreshMe();
-    } catch (e: any) {
-      setErr(String(e?.message || "Errore salvataggio profilo."));
-    } finally {
-      setSaving(false);
-    }
-  }
+  const btn: React.CSSProperties = {
+    padding: "12px 14px",
+    borderRadius: 12,
+    border: "1px solid #2a2a2a",
+    background: "#7A29FF",
+    color: "#fff",
+    fontWeight: 950,
+    cursor: "pointer",
+  };
 
   return (
-    <div style={wrapStyle}>
-      <div style={{ padding: 14, maxWidth: 900, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <button
-              type="button"
-              onClick={() => nav("/", { replace: false })}
+    <div style={pageWrap}>
+      <Sidebar />
+
+      <div style={content}>
+        <div style={card}>
+          <h2 style={{ margin: "0 0 10px 0" }}>Profilo</h2>
+
+          {msg && (
+            <div
               style={{
-                padding: "8px 10px",
+                marginBottom: 12,
+                padding: "10px 12px",
                 borderRadius: 12,
                 border: "1px solid #2a2a2a",
-                background: "transparent",
-                cursor: "pointer",
-                fontWeight: 950,
+                background: "rgba(58,190,255,0.08)",
+                color: "var(--tiko-text)",
+                fontWeight: 850,
               }}
-              aria-label="Indietro"
             >
-              ←
+              {msg}
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 14, flexWrap: "wrap" }}>
+            <div style={{ width: 74, height: 74, borderRadius: 999, border: "1px solid #333", overflow: "hidden", background: "#1f1f26" }}>
+              {avatarUrl ? (
+                <img src={avatarUrl} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              ) : (
+                <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 950 }}>
+                  —
+                </div>
+              )}
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              <div style={{ fontWeight: 900, color: "var(--tiko-text-dim)" }}>
+                @{user?.username || "—"} • {user?.email || ""}
+              </div>
+
+              <label style={{ fontSize: 13, color: "var(--tiko-text-dim)", fontWeight: 900 }}>
+                Carica immagine profilo
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) onUploadAvatar(f);
+                    e.currentTarget.value = "";
+                  }}
+                  style={{ display: "block", marginTop: 6 }}
+                />
+              </label>
+            </div>
+          </div>
+
+          <div style={row}>
+            <div style={{ flex: "1 1 320px" }}>
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Nome visualizzato</label>
+              <input style={input} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+            </div>
+            <div style={{ flex: "1 1 320px" }}>
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Testo stato</label>
+              <input style={input} value={statusText} onChange={(e) => setStatusText(e.target.value)} placeholder="Es. In pausa, al lavoro..." />
+            </div>
+          </div>
+
+          <div style={{ height: 10 }} />
+
+          <div style={row}>
+            <div style={{ flex: "1 1 220px" }}>
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Stato</label>
+              <select style={input as any} value={state} onChange={(e) => setState(e.target.value as StateKey)}>
+                {STATE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ flex: "1 1 220px" }}>
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Mood</label>
+              <select style={input as any} value={mood} onChange={(e) => setMood(e.target.value as MoodKey)}>
+                {MOOD_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div style={{ flex: "1 1 220px" }}>
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Città</label>
+              <input style={input} value={city} onChange={(e) => setCity(e.target.value)} />
+            </div>
+
+            <div style={{ flex: "1 1 220px" }}>
+              <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Zona</label>
+              <input style={input} value={area} onChange={(e) => setArea(e.target.value)} />
+            </div>
+          </div>
+
+          <div style={{ height: 14 }} />
+
+          <div style={{ display: "flex", justifyContent: "flex-end" }}>
+            <button type="button" onClick={onSave} style={{ ...btn, opacity: busy ? 0.7 : 1 }} disabled={busy}>
+              {busy ? "Salvataggio..." : "Salva"}
             </button>
-            <h2 style={{ margin: 0 }}>{title}</h2>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => saveProfile()}
-            disabled={saving}
-            style={{
-              padding: "8px 10px",
-              borderRadius: 12,
-              border: "1px solid #2a2a2a",
-              background: "var(--tiko-mint)",
-              color: "#000",
-              fontWeight: 950,
-              cursor: saving ? "not-allowed" : "pointer",
-              opacity: saving ? 0.7 : 1,
-            }}
-          >
-            {saving ? "Salvo..." : "Salva"}
-          </button>
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 12 }}>
-          <div style={cardStyle}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div
-                style={{
-                  width: 68,
-                  height: 68,
-                  borderRadius: 999,
-                  overflow: "hidden",
-                  border: "1px solid #2a2a2a",
-                  background: "#111",
-                  flex: "0 0 auto",
-                }}
-              >
-                {resolveAvatar((user as any)?.avatarUrl) ? (
-                  <img
-                    src={resolveAvatar((user as any)?.avatarUrl)!}
-                    alt=""
-                    style={{ width: "100%", height: "100%", objectFit: "cover" }}
-                  />
-                ) : null}
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontWeight: 950, fontSize: 18, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                  {user?.displayName || user?.username || "Utente"}
-                </div>
-                <div style={{ color: "var(--tiko-text-dim)", fontSize: 12 }}>
-                  @{user?.username || ""}
-                </div>
-              </div>
-            </div>
-
-            {err && <div style={{ marginTop: 10, color: "#ff6b6b", fontWeight: 950 }}>Errore: {err}</div>}
-            {msg && <div style={{ marginTop: 10, color: "var(--tiko-text-dim)", fontWeight: 900 }}>{msg}</div>}
-          </div>
-
-          <div style={cardStyle}>
-            <div style={{ fontWeight: 950, marginBottom: 10 }}>Dati profilo</div>
-
-            <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Nome visualizzato</label>
-            <input value={displayName} onChange={(e) => setDisplayName(e.target.value)} style={inputStyle} />
-
-            <div style={{ height: 10 }} />
-
-            <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Status</label>
-            <input value={statusText} onChange={(e) => setStatusText(e.target.value)} style={inputStyle} />
-
-            <div style={{ height: 10 }} />
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div>
-                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Città</label>
-                <input value={city} onChange={(e) => setCity(e.target.value)} style={inputStyle} />
-              </div>
-              <div>
-                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Zona</label>
-                <input value={area} onChange={(e) => setArea(e.target.value)} style={inputStyle} />
-              </div>
-            </div>
-
-            <div style={{ height: 10 }} />
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <div>
-                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Mood</label>
-                <input value={mood} onChange={(e) => setMood(e.target.value)} style={inputStyle} placeholder="es. FELICE" />
-              </div>
-              <div>
-                <label style={{ display: "block", fontSize: 12, color: "var(--tiko-text-dim)", marginBottom: 6 }}>Stato</label>
-                <input value={state} onChange={(e) => setState(e.target.value)} style={inputStyle} placeholder="es. DISPONIBILE" />
-              </div>
-            </div>
-
-            <div style={{ marginTop: 10, color: "var(--tiko-text-dim)", fontSize: 12 }}>
-              Nota: se nel tuo backend mood/state sono a scelta (select), puoi sostituire questi input con select.
-              Qui li lascio “safe” per non romperti nulla.
-            </div>
           </div>
         </div>
       </div>

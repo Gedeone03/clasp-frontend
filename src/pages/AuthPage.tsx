@@ -1,289 +1,201 @@
-import React, { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import React, { useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { useAuth } from "../AuthContext";
 
 type Mode = "login" | "register";
 
 export default function AuthPage() {
-  // Marker visibile: se non lo vedi sul sito live, Netlify non sta servendo la tua versione
-  const BUILD_MARKER = "AUTH FIX BUILD: 2025-12-19-01";
-
-  console.log(BUILD_MARKER);
-
   const nav = useNavigate();
-  const { login, register } = useAuth();
+  const auth = useAuth() as any;
 
   const [mode, setMode] = useState<Mode>("login");
 
-  // login
-  const [identifier, setIdentifier] = useState("");
+  const [emailOrUsername, setEmailOrUsername] = useState("");
   const [password, setPassword] = useState("");
 
-  // register
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [city, setCity] = useState("");
+  const [area, setArea] = useState("");
   const [termsAccepted, setTermsAccepted] = useState(false);
 
-  const [loading, setLoading] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const resetMsgs = () => {
-    setStatus(null);
+  const title = useMemo(() => (mode === "login" ? "Accedi" : "Crea account"), [mode]);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
     setError(null);
-  };
+    if (busy) return;
 
-  const doLogin = async () => {
-    resetMsgs();
     try {
-      setLoading(true);
-      setStatus("Invio login...");
-      const id = identifier.trim();
-      const pw = password;
+      setBusy(true);
 
-      if (!id || !pw) {
-        setError("Inserisci email/username e password.");
+      if (mode === "login") {
+        if (!emailOrUsername.trim() || !password) {
+          setError("Compila tutti i campi.");
+          return;
+        }
+
+        // login(emailOrUsername, password)
+        await auth.login(emailOrUsername.trim(), password);
+        nav("/", { replace: true });
         return;
       }
 
-      await login(id, pw);
-      setStatus("Login OK. Reindirizzamento...");
-      nav("/", { replace: true });
-    } catch (e: any) {
-      setError(String(e?.message || "Errore durante il login."));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const doRegister = async () => {
-    resetMsgs();
-    try {
-      setLoading(true);
-      setStatus("Invio registrazione...");
-
-      const em = email.trim();
-      const un = username.trim();
-      const dn = displayName.trim();
-      const pw = password;
-
-      if (!em || !un || !dn || !pw) {
+      // register
+      if (!email.trim() || !username.trim() || !displayName.trim() || !password) {
         setError("Compila tutti i campi obbligatori.");
         return;
       }
 
       if (!termsAccepted) {
-        setError("Devi accettare i Termini e la Privacy.");
+        setError("Devi accettare i Termini e le Condizioni d'uso.");
         return;
       }
 
-      await register({
-        email: em,
-        password: pw,
-        username: un,
-        displayName: dn,
-        termsAccepted,
+      await auth.register({
+        email: email.trim(),
+        username: username.trim(),
+        displayName: displayName.trim(),
+        password,
+        city: city.trim() || null,
+        area: area.trim() || null,
+        termsAccepted: true,
       });
 
-      setStatus("Registrazione OK. Reindirizzamento...");
       nav("/", { replace: true });
     } catch (e: any) {
-      setError(String(e?.message || "Errore durante la registrazione."));
+      const msg = e?.response?.data?.error || e?.message || "Errore durante la richiesta.";
+      setError(String(msg));
     } finally {
-      setLoading(false);
+      setBusy(false);
     }
+  }
+
+  const card: React.CSSProperties = {
+    width: "min(520px, 92vw)",
+    background: "var(--tiko-bg-card)",
+    border: "1px solid #222",
+    borderRadius: 18,
+    padding: 16,
+    boxShadow: "0 10px 30px rgba(0,0,0,0.3)",
   };
 
-  // Forza l’azione anche se submit non scatta
-  const onPrimaryClick = async (e: React.MouseEvent) => {
-    e.preventDefault();
-    if (loading) return;
-
-    if (mode === "login") await doLogin();
-    else await doRegister();
-  };
-
-  const inputStyle: React.CSSProperties = {
-    padding: "10px 12px",
+  const input: React.CSSProperties = {
+    width: "100%",
+    padding: "12px 12px",
     borderRadius: 12,
     border: "1px solid #2a2a2a",
     background: "var(--tiko-bg-dark)",
     color: "var(--tiko-text)",
+    outline: "none",
+    fontSize: 14,
   };
 
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "var(--tiko-bg-dark)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 16,
-      }}
-    >
-      <div
-        style={{
-          width: "min(520px, 100%)",
-          background: "var(--tiko-bg-card)",
-          border: "1px solid #222",
-          borderRadius: 16,
-          padding: 16,
-        }}
-      >
-        <div style={{ fontSize: 12, color: "yellow", marginBottom: 10, fontWeight: 900 }}>
-          {BUILD_MARKER}
-        </div>
+  const btn: React.CSSProperties = {
+    width: "100%",
+    padding: "12px 12px",
+    borderRadius: 12,
+    border: "1px solid #2a2a2a",
+    background: "#7A29FF",
+    color: "#fff",
+    fontWeight: 950,
+    cursor: "pointer",
+  };
 
-        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-          <button
-            type="button"
-            onClick={() => {
-              resetMsgs();
-              setMode("login");
-            }}
-            style={{
-              flex: 1,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #2a2a2a",
-              background: mode === "login" ? "var(--tiko-purple)" : "transparent",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
+  const tabBtn = (active: boolean): React.CSSProperties => ({
+    flex: 1,
+    padding: "10px 10px",
+    borderRadius: 12,
+    border: "1px solid #2a2a2a",
+    background: active ? "var(--tiko-bg-dark)" : "transparent",
+    color: "var(--tiko-text)",
+    fontWeight: 950,
+    cursor: "pointer",
+  });
+
+  return (
+    <div style={{ minHeight: "100vh", background: "var(--tiko-bg-dark)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+      <div style={card}>
+        {/* ✅ RIMOSSO: banner giallo "AUTH FIX BUILD..." */}
+
+        <div style={{ display: "flex", gap: 10, marginBottom: 14 }}>
+          <button type="button" style={tabBtn(mode === "login")} onClick={() => setMode("login")}>
             Login
           </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              resetMsgs();
-              setMode("register");
-            }}
-            style={{
-              flex: 1,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #2a2a2a",
-              background: mode === "register" ? "var(--tiko-purple)" : "transparent",
-              fontWeight: 900,
-              cursor: "pointer",
-            }}
-          >
-            Registrati
+          <button type="button" style={tabBtn(mode === "register")} onClick={() => setMode("register")}>
+            Registrazione
           </button>
         </div>
 
-        {/* FORM */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            if (mode === "login") void doLogin();
-            else void doRegister();
-          }}
-          style={{ display: "flex", flexDirection: "column", gap: 10 }}
-        >
+        <h2 style={{ margin: "0 0 10px 0", color: "var(--tiko-text)" }}>{title}</h2>
+
+        {error && (
+          <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 850 }}>
+            {error}
+          </div>
+        )}
+
+        <form onSubmit={onSubmit} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {mode === "login" ? (
             <>
               <input
-                placeholder="Email o username"
-                value={identifier}
-                onChange={(e) => setIdentifier(e.target.value)}
-                style={inputStyle}
+                style={input}
+                value={emailOrUsername}
+                onChange={(e) => setEmailOrUsername(e.target.value)}
+                placeholder="Email oppure Username"
                 autoComplete="username"
               />
+
               <input
-                placeholder="Password"
-                type="password"
+                style={input}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                style={inputStyle}
+                placeholder="Password"
+                type="password"
                 autoComplete="current-password"
               />
             </>
           ) : (
             <>
-              <input
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                style={inputStyle}
-                autoComplete="email"
-              />
+              <input style={input} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Email" autoComplete="email" />
+              <input style={input} value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Username" autoComplete="username" />
+              <input style={input} value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Nome visualizzato" />
 
-              <input
-                placeholder="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                style={inputStyle}
-                autoComplete="username"
-              />
+              <div style={{ display: "flex", gap: 10 }}>
+                <input style={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città (opzionale)" />
+                <input style={input} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Zona (opzionale)" />
+              </div>
 
-              <input
-                placeholder="Nome visualizzato"
-                value={displayName}
-                onChange={(e) => setDisplayName(e.target.value)}
-                style={inputStyle}
-                autoComplete="name"
-              />
+              <input style={input} value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Password" type="password" autoComplete="new-password" />
 
-              <input
-                placeholder="Password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                style={inputStyle}
-                autoComplete="new-password"
-              />
-
-              <label style={{ fontSize: 13, color: "var(--tiko-text-dim)" }}>
-                <input
-                  type="checkbox"
-                  checked={termsAccepted}
-                  onChange={(e) => setTermsAccepted(e.target.checked)}
-                  style={{ marginRight: 8 }}
-                />
-                Accetto i <Link to="/terms">Termini</Link> e la <Link to="/privacy">Privacy</Link>
+              <label style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 13, color: "var(--tiko-text-dim)" }}>
+                <input type="checkbox" checked={termsAccepted} onChange={(e) => setTermsAccepted(e.target.checked)} />
+                <span>
+                  Accetto i{" "}
+                  <Link to="/terms" style={{ color: "#3ABEFF", fontWeight: 900 }}>
+                    Termini e Condizioni
+                  </Link>{" "}
+                  e l’{" "}
+                  <Link to="/privacy" style={{ color: "#3ABEFF", fontWeight: 900 }}>
+                    Informativa Privacy
+                  </Link>
+                  .
+                </span>
               </label>
             </>
           )}
 
-          <button
-            type="button"
-            onClick={onPrimaryClick}
-            disabled={loading}
-            style={{
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #2a2a2a",
-              background: "var(--tiko-mint)",
-              color: "#000",
-              fontWeight: 950,
-              cursor: loading ? "not-allowed" : "pointer",
-              opacity: loading ? 0.7 : 1,
-            }}
-          >
-            {loading ? "Invio..." : mode === "login" ? "Entra" : "Crea account"}
+          <button type="submit" style={{ ...btn, opacity: busy ? 0.7 : 1 }} disabled={busy}>
+            {busy ? "Attendere..." : mode === "login" ? "Accedi" : "Registrati"}
           </button>
-
-          {/* Stato/Errore sempre visibili */}
-          {status && (
-            <div style={{ marginTop: 6, color: "var(--tiko-text-dim)", fontWeight: 900, fontSize: 13 }}>
-              {status}
-            </div>
-          )}
-
-          {error && (
-            <div style={{ marginTop: 6, color: "#ff6b6b", fontWeight: 950, fontSize: 13 }}>
-              ERRORE: {error}
-            </div>
-          )}
         </form>
 
-        <div style={{ marginTop: 14, fontSize: 12, color: "var(--tiko-text-dim)" }}>
-          Se la scritta gialla non cambia dopo il deploy, stai vedendo una versione in cache.
+        <div style={{ marginTop: 12, fontSize: 12, color: "var(--tiko-text-dim)" }}>
+          Se dopo il login non succede nulla, di solito è perché il backend non risponde o il token non viene salvato correttamente.
         </div>
       </div>
     </div>
