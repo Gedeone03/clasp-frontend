@@ -234,21 +234,9 @@ export default function ProfilePage(props: any) {
     cursor: "pointer",
   };
 
-  // ✅ MOBILE: pagina dedicata fullscreen (non schiaccia la colonna destra)
-  const mobileWrap: React.CSSProperties = isMobile
-    ? { position: "fixed", inset: 0, zIndex: 50, background: "var(--tiko-bg-dark)", overflow: "hidden", display: "flex", flexDirection: "column" }
-    : {};
-
-  const mobileHeader: React.CSSProperties = isMobile
-    ? { padding: "10px 12px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--tiko-bg-card)" }
-    : {};
-
-  const content: React.CSSProperties = isMobile
-    ? { flex: 1, overflowY: "auto", padding: 14 }
-    : { flex: 1, minWidth: 0, overflowY: "auto", padding: 14 };
-
+  // ✅ MOBILE = pagina dedicata fullscreen (overlay)
   const pageWrap: React.CSSProperties = isMobile
-    ? mobileWrap
+    ? { position: "fixed", inset: 0, zIndex: 999, background: "var(--tiko-bg-dark)", display: "flex", flexDirection: "column" }
     : { height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" };
 
   return (
@@ -256,7 +244,7 @@ export default function ProfilePage(props: any) {
       {!isMobile && <Sidebar />}
 
       {isMobile && (
-        <div style={mobileHeader}>
+        <div style={{ padding: "10px 12px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--tiko-bg-card)" }}>
           <button
             type="button"
             onClick={() => {
@@ -272,7 +260,7 @@ export default function ProfilePage(props: any) {
         </div>
       )}
 
-      <div style={content}>
+      <div style={{ flex: 1, overflowY: "auto", padding: 14 }}>
         <div style={card}>
           <h2 style={{ margin: "0 0 10px 0" }}>Profilo</h2>
 
