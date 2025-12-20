@@ -1,214 +1,113 @@
-import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { API_BASE_URL } from "./config";
+import React, { createContext, useContext, useEffect, useState } from "react";
+import {
+  AuthResponse,
+  User,
+  login as apiLogin,
+  register as apiRegister,
+  fetchMe,
+  setAuthToken,
+  loadAuthTokenFromStorage,
+} from "./api";
 
-type User = {
-  id: number;
-  email?: string;
-  username: string;
-  displayName: string;
-  city?: string | null;
-  area?: string | null;
-  state?: string | null;
-  statusText?: string | null;
-  mood?: string | null;
-  interests?: any;
-  avatarUrl?: string | null;
-};
-
-type RegisterInput = {
-  email: string;
-  password: string;
-  username: string;
-  displayName: string;
-  termsAccepted: boolean;
-};
-
-type AuthContextValue = {
+interface AuthContextValue {
   user: User | null;
   loading: boolean;
-  login: (identifier: string, password: string) => Promise<void>;
-  register: (input: RegisterInput) => Promise<void>;
+  login: (emailOrUsername: string, password: string) => Promise<void>;
+  // register accetta sia stile vecchio (parametri) sia stile nuovo (oggetto)
+  register: (...args: any[]) => Promise<void>;
   logout: () => void;
   refreshMe: () => Promise<void>;
-};
+  setUser: (u: User | null) => void;
+}
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
-function normalizeToken(raw: any): string | null {
-  if (!raw) return null;
-  let t = String(raw).trim();
-  t = t.replace(/^"+|"+$/g, "").trim();
-  if (t.toLowerCase().startsWith("bearer ")) t = t.slice(7).trim();
-  return t.length ? t : null;
-}
-
-function getStoredToken(): string | null {
-  try {
-    const t = localStorage.getItem("token") || localStorage.getItem("authToken") || "";
-    return normalizeToken(t);
-  } catch {
-    return null;
-  }
-}
-
-function setStoredToken(token: string | null) {
-  try {
-    if (!token) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("authToken");
-      return;
-    }
-    const clean = normalizeToken(token);
-    if (!clean) return;
-    localStorage.setItem("token", clean);
-    localStorage.setItem("authToken", clean);
-  } catch {
-    // ignore
-  }
-}
-
-async function httpJson<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const token = getStoredToken();
-
-  const headers: Record<string, string> = {
-    "Content-Type": "application/json",
-    ...(init.headers as any),
-  };
-
-  if (token) headers.Authorization = `Bearer ${token}`;
-
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-  });
-
-  let data: any = null;
-  try {
-    data = await res.json();
-  } catch {
-    data = null;
-  }
-
-  if (!res.ok) {
-    const msg =
-      data?.error ||
-      data?.message ||
-      `Errore HTTP ${res.status}`;
-    throw new Error(msg);
-  }
-
-  return data as T;
-}
-
-async function apiMe(): Promise<User> {
-  return await httpJson<User>("/me", { method: "GET" });
-}
-
-export function AuthProvider({ children }: { children: React.ReactNode }) {
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
   async function refreshMe() {
-    const token = getStoredToken();
-    if (!token) {
-      setUser(null);
-      return;
-    }
-
     try {
-      const me = await apiMe();
+      const me = await fetchMe();
       setUser(me);
-    } catch (e: any) {
-      // token non valido -> pulisci
-      const msg = String(e?.message || "");
-      if (msg.toLowerCase().includes("token") || msg.includes("401")) {
-        setStoredToken(null);
-      }
+    } catch {
       setUser(null);
-      throw e;
     }
   }
 
   useEffect(() => {
-    (async () => {
-      setLoading(true);
+    // ✅ importantissimo: ricarica token dallo storage al boot
+    loadAuthTokenFromStorage();
+
+    const init = async () => {
       try {
         await refreshMe();
-      } catch {
-        // ignore
+      } finally {
+        setLoading(false);
       }
-      setLoading(false);
-    })();
+    };
+
+    init();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function login(identifier: string, password: string) {
-    const id = identifier.trim();
-    if (!id || !password) throw new Error("Inserisci email/username e password.");
+  const handleAuthSuccess = (data: AuthResponse) => {
+    setAuthToken(data.token);
+    setUser(data.user);
+  };
 
-    // compatibile con backend
-    const payload = {
-      emailOrUsername: id,
-      email: id,
-      username: id,
-      identifier: id,
-      password,
-    };
-
-    const data: any = await httpJson<any>("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
-
-    const token = normalizeToken(data?.token || data?.accessToken || data?.jwt);
-    if (!token) throw new Error("Login non riuscito: token non ricevuto.");
-
-    setStoredToken(token);
-
-    // user immediato se presente, altrimenti /me
-    if (data?.user?.id) {
-      setUser(data.user);
-    } else {
-      await refreshMe();
+  const login = async (emailOrUsername: string, password: string) => {
+    setLoading(true);
+    try {
+      const data = await apiLogin({ emailOrUsername, password });
+      handleAuthSuccess(data);
+    } finally {
+      setLoading(false);
     }
-  }
+  };
 
-  async function register(input: RegisterInput) {
-    const payload = {
-      email: input.email,
-      password: input.password,
-      username: input.username,
-      displayName: input.displayName,
-      termsAccepted: input.termsAccepted,
-      acceptTerms: input.termsAccepted,
-    };
+  const register = async (...args: any[]) => {
+    setLoading(true);
+    try {
+      // stile nuovo: register({ ... })
+      if (args.length === 1 && typeof args[0] === "object") {
+        const data = await apiRegister(args[0]);
+        handleAuthSuccess(data);
+        return;
+      }
 
-    const data: any = await httpJson<any>("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+      // stile vecchio: register(email, password, displayName, username, purpose?, city?, area?)
+      const [email, password, displayName, username, purpose, city, area] = args;
+      const data = await apiRegister({
+        email,
+        password,
+        displayName,
+        username,
+        // purpose non più obbligatorio: lo passiamo solo se c’è
+        ...(purpose ? { purpose } : {}),
+        ...(city ? { city } : {}),
+        ...(area ? { area } : {}),
+        // se la UI lo richiede, di default mettiamo true
+        termsAccepted: true,
+      } as any);
 
-    const token = normalizeToken(data?.token || data?.accessToken || data?.jwt);
-    if (!token) throw new Error("Registrazione non riuscita: token non ricevuto.");
+      handleAuthSuccess(data);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    setStoredToken(token);
-
-    if (data?.user?.id) setUser(data.user);
-    else await refreshMe();
-  }
-
-  function logout() {
-    setStoredToken(null);
+  const logout = () => {
+    setAuthToken(null);
     setUser(null);
-  }
+  };
 
-  const value = useMemo<AuthContextValue>(
-    () => ({ user, loading, login, register, logout, refreshMe }),
-    [user, loading]
+  return (
+    <AuthContext.Provider value={{ user, loading, login, register, logout, refreshMe, setUser }}>
+      {children}
+    </AuthContext.Provider>
   );
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
-}
+};
 
 export function useAuth() {
   const ctx = useContext(AuthContext);
