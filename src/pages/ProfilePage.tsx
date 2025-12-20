@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import Sidebar from "../components/ui/Sidebar";
 import { API_BASE_URL } from "../config";
 import { useAuth } from "../AuthContext";
@@ -6,31 +7,53 @@ import { useAuth } from "../AuthContext";
 type StateKey = "DISPONIBILE" | "OCCUPATO" | "ASSENTE" | "OFFLINE" | "INVISIBILE" | "VISIBILE_A_TUTTI" | "";
 type MoodKey = "FELICE" | "TRISTE" | "RILASSATO" | "ANSIOSO" | "ENTUSIASTA" | "ARRABBIATO" | "SOLO" | "";
 
-function getToken(): string {
-  let t = localStorage.getItem("token") || "";
+function normalizeToken(raw: string | null | undefined): string {
+  let t = String(raw || "").trim();
+  if (!t) return "";
   if (t.toLowerCase().startsWith("bearer ")) t = t.slice(7).trim();
-  return t.trim();
+  if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) t = t.slice(1, -1).trim();
+  return t;
+}
+
+function getToken(): string {
+  return normalizeToken(
+    localStorage.getItem("token") ||
+      localStorage.getItem("authToken") ||
+      localStorage.getItem("accessToken") ||
+      ""
+  );
+}
+
+function baseUrl(): string {
+  return (API_BASE_URL || "").replace(/\/+$/, "");
 }
 
 function resolveUrl(url?: string | null) {
   if (!url) return "";
-  let t = url.trim();
+  let t = String(url).trim();
   if (!t) return "";
-  if (t.startsWith("/")) t = `${API_BASE_URL.replace(/\/+$/, "")}${t}`;
+  if (t.startsWith("/")) t = `${baseUrl()}${t}`;
   if (typeof window !== "undefined" && window.location.protocol === "https:" && t.startsWith("http://")) {
     t = t.replace(/^http:\/\//i, "https://");
   }
   return t;
 }
 
+function useIsMobile(bp = 900) {
+  const [m, setM] = useState(() => (typeof window !== "undefined" ? window.innerWidth < bp : false));
+  useEffect(() => {
+    const onR = () => setM(window.innerWidth < bp);
+    window.addEventListener("resize", onR);
+    return () => window.removeEventListener("resize", onR);
+  }, [bp]);
+  return m;
+}
+
 async function apiFetch(path: string, init?: RequestInit) {
   const token = getToken();
   const headers: any = { ...(init?.headers || {}) };
   if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(`${API_BASE_URL.replace(/\/+$/, "")}${path}`, {
-    ...init,
-    headers,
-  });
+  const res = await fetch(`${baseUrl()}${path}`, { ...init, headers });
   if (!res.ok) {
     const txt = await res.text().catch(() => "");
     throw new Error(txt || `HTTP ${res.status}`);
@@ -38,7 +61,10 @@ async function apiFetch(path: string, init?: RequestInit) {
   return res;
 }
 
-export default function ProfilePage() {
+export default function ProfilePage(props: any) {
+  const nav = useNavigate();
+  const isMobile = useIsMobile(900);
+
   const auth = useAuth() as any;
   const user = auth.user as any;
 
@@ -85,15 +111,12 @@ export default function ProfilePage() {
   }
 
   function updateAuthUser(nextUser: any) {
-    // prova ad aggiornare il context se il metodo esiste
     try { auth.setUser?.(nextUser); } catch {}
     try { auth.updateUser?.(nextUser); } catch {}
-    // fallback: salva in localStorage se l’app lo usa
     try { localStorage.setItem("user", JSON.stringify(nextUser)); } catch {}
   }
 
   useEffect(() => {
-    // se non c’è token, la profile non può funzionare
     const token = getToken();
     if (!token) {
       setMsg("Non autenticato. Effettua il login.");
@@ -106,7 +129,6 @@ export default function ProfilePage() {
         const res = await apiFetch("/me");
         const me = await res.json();
         if (!alive) return;
-
         updateAuthUser(me);
         applyUserToForm(me);
       } catch (e: any) {
@@ -115,9 +137,7 @@ export default function ProfilePage() {
       }
     })();
 
-    return () => {
-      alive = false;
-    };
+    return () => { alive = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -159,7 +179,7 @@ export default function ProfilePage() {
       fd.append("avatar", file);
 
       const token = getToken();
-      const res = await fetch(`${API_BASE_URL.replace(/\/+$/, "")}/upload/avatar`, {
+      const res = await fetch(`${baseUrl()}/upload/avatar`, {
         method: "POST",
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
         body: fd,
@@ -170,12 +190,9 @@ export default function ProfilePage() {
         throw new Error(txt || `HTTP ${res.status}`);
       }
 
-      const data = await res.json();
-      // backend può rispondere { user } o solo avatarUrl
-      const nextUser = data?.user ? data.user : { ...(user || {}), avatarUrl: data.avatarUrl };
+      const data = await res.json().catch(() => ({}));
+      const nextUser = data?.user ? data.user : { ...(user || {}), avatarUrl: data?.avatarUrl || user?.avatarUrl };
       updateAuthUser(nextUser);
-
-      // ricarica form
       applyUserToForm(nextUser);
       setMsg("Avatar aggiornato.");
     } catch (e: any) {
@@ -184,20 +201,6 @@ export default function ProfilePage() {
       setBusy(false);
     }
   }
-
-  const pageWrap: React.CSSProperties = {
-    height: "100vh",
-    display: "flex",
-    overflow: "hidden",
-    background: "var(--tiko-bg-dark)",
-  };
-
-  const content: React.CSSProperties = {
-    flex: 1,
-    minWidth: 0,
-    overflowY: "auto",
-    padding: 14,
-  };
 
   const card: React.CSSProperties = {
     maxWidth: 820,
@@ -231,26 +234,50 @@ export default function ProfilePage() {
     cursor: "pointer",
   };
 
+  // ✅ MOBILE: pagina dedicata fullscreen (non schiaccia la colonna destra)
+  const mobileWrap: React.CSSProperties = isMobile
+    ? { position: "fixed", inset: 0, zIndex: 50, background: "var(--tiko-bg-dark)", overflow: "hidden", display: "flex", flexDirection: "column" }
+    : {};
+
+  const mobileHeader: React.CSSProperties = isMobile
+    ? { padding: "10px 12px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between", background: "var(--tiko-bg-card)" }
+    : {};
+
+  const content: React.CSSProperties = isMobile
+    ? { flex: 1, overflowY: "auto", padding: 14 }
+    : { flex: 1, minWidth: 0, overflowY: "auto", padding: 14 };
+
+  const pageWrap: React.CSSProperties = isMobile
+    ? mobileWrap
+    : { height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" };
+
   return (
     <div style={pageWrap}>
-      <Sidebar />
+      {!isMobile && <Sidebar />}
+
+      {isMobile && (
+        <div style={mobileHeader}>
+          <button
+            type="button"
+            onClick={() => {
+              if (typeof props?.onBack === "function") props.onBack();
+              else nav(-1);
+            }}
+            style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #2a2a2a", background: "var(--tiko-bg-dark)", color: "var(--tiko-text)", fontWeight: 950 }}
+          >
+            ← Indietro
+          </button>
+          <div style={{ fontWeight: 950 }}>Profilo</div>
+          <div style={{ width: 90 }} />
+        </div>
+      )}
 
       <div style={content}>
         <div style={card}>
           <h2 style={{ margin: "0 0 10px 0" }}>Profilo</h2>
 
           {msg && (
-            <div
-              style={{
-                marginBottom: 12,
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid #2a2a2a",
-                background: "rgba(58,190,255,0.08)",
-                color: "var(--tiko-text)",
-                fontWeight: 850,
-              }}
-            >
+            <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 12, border: "1px solid #2a2a2a", background: "rgba(58,190,255,0.08)", color: "var(--tiko-text)", fontWeight: 850 }}>
               {msg}
             </div>
           )}
@@ -260,9 +287,7 @@ export default function ProfilePage() {
               {avatarUrl ? (
                 <img src={avatarUrl} alt="avatar" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
               ) : (
-                <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 950 }}>
-                  —
-                </div>
+                <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 950 }}>—</div>
               )}
             </div>
 
@@ -305,9 +330,7 @@ export default function ProfilePage() {
               <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Stato</label>
               <select style={input as any} value={state} onChange={(e) => setState(e.target.value as StateKey)}>
                 {STATE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
@@ -316,9 +339,7 @@ export default function ProfilePage() {
               <label style={{ fontSize: 12, color: "var(--tiko-text-dim)", fontWeight: 900 }}>Mood</label>
               <select style={input as any} value={mood} onChange={(e) => setMood(e.target.value as MoodKey)}>
                 {MOOD_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>
-                    {o.label}
-                  </option>
+                  <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
               </select>
             </div>
