@@ -1,3 +1,4 @@
+
 import React, { useEffect, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
@@ -65,13 +66,10 @@ export default function HomePage() {
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // ✅ Mobile “pagine dedicate” (solo mobile)
-  // - chats: lista conversazioni
-  // - search: pagina ricerca utenti
-  // - chat: pagina chat
+  // Mobile pages (solo mobile): chats | search | chat
   const [mobileTab, setMobileTab] = useState<"chats" | "search" | "chat">("chats");
 
-  // ===== Ricerca utenti (sopra lista chat su desktop, pagina dedicata su mobile) =====
+  // ===== Ricerca utenti =====
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -120,7 +118,6 @@ export default function HomePage() {
     borderColor: "var(--tiko-mint)",
   };
 
-  // Piccolo stile bottone header mobile (solo funzione, UI minimale)
   const headerBtn: React.CSSProperties = {
     ...btn,
     padding: "8px 10px",
@@ -156,13 +153,12 @@ export default function HomePage() {
     })();
   }, [selectedConversation?.id]);
 
-  // ✅ LIVE MESSAGES (invariato): ricarica la chat aperta ogni 2 secondi
+  // LIVE messages: refresh ogni 2 secondi (solo nella chat aperta; su mobile solo quando sei nella pagina chat)
   useEffect(() => {
     if (!user) return;
     const convId = Number(selectedConversation?.id || 0);
     if (!convId) return;
 
-    // su mobile, facciamolo solo quando sei nella pagina chat
     if (isMobile && mobileTab !== "chat") return;
 
     let alive = true;
@@ -392,14 +388,13 @@ export default function HomePage() {
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // ===== MOBILE: pagine dedicate (chats / search / chat) =====
-  // Nota: NON tocchiamo desktop.
+  // ===== MOBILE: pagine dedicate Search e Chat con freccia indietro (solo mobile) =====
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          {/* Header mobile (solo funzione di navigazione pagine) */}
+          {/* Header mobile con freccia solo nelle pagine dedicate */}
           <div
             style={{
               padding: 10,
@@ -421,7 +416,6 @@ export default function HomePage() {
               </>
             ) : mobileTab === "chat" ? (
               <>
-                {/* Il back vero lo gestisce ChatWindow, qui teniamo header neutro */}
                 <button type="button" style={headerBtn} onClick={() => setMobileTab("chats")} aria-label="Indietro">
                   ←
                 </button>
@@ -440,10 +434,8 @@ export default function HomePage() {
 
           <div style={{ flex: 1, minHeight: 0 }}>
             {mobileTab === "search" ? (
-              // Pagina dedicata Ricerca
               <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
             ) : mobileTab === "chat" ? (
-              // Pagina dedicata Chat
               <ChatWindow
                 conversationId={selectedConversation?.id}
                 conversation={selectedConversation}
@@ -452,7 +444,6 @@ export default function HomePage() {
                 onBack={() => setMobileTab("chats")}
               />
             ) : (
-              // Pagina lista conversazioni
               <ConversationList
                 conversations={conversations}
                 selectedConversationId={selectedConversation?.id ?? null}
@@ -468,7 +459,7 @@ export default function HomePage() {
     );
   }
 
-  // ===== DESKTOP: struttura invariata (ricerca sopra + chat list sotto a sinistra, chat a destra) =====
+  // ===== DESKTOP: invariato =====
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
