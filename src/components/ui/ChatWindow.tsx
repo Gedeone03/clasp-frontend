@@ -1,153 +1,256 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { sendMessage, uploadAudio, uploadFile, uploadImage } from "../../api";
+import { API_BASE_URL } from "../../config";
 
-type User = {
+type Msg = {
   id: number;
-  username?: string;
-  displayName?: string;
-  avatarUrl?: string | null;
+  senderId: number;
+  content: string;
+  createdAt?: string | Date;
+  editedAt?: string | Date | null;
+  deletedAt?: string | Date | null;
+  replyToId?: number | null;
+  sender?: { id: number; username?: string; displayName?: string; avatarUrl?: string | null } | null;
 };
 
-type MsgAny = any;
+function getAuthTokenLoose(): string | null {
+  // prova alcune chiavi comuni senza toccare la tua AuthContext
+  return (
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("jwt") ||
+    localStorage.getItem("clasp_token") ||
+    localStorage.getItem("tiko_token") ||
+    null
+  );
+}
 
-function formatTime(dt: any): string {
-  const d = new Date(dt);
+function resolveUploadedUrl(u: string): string {
+  if (!u) return u;
+  if (u.startsWith("http://") || u.startsWith("https://")) return u;
+  if (u.startsWith("/")) return `${API_BASE_URL}${u}`;
+  return `${API_BASE_URL}/${u}`;
+}
+
+function looksLikeUrl(s: string) {
+  return /^https?:\/\//i.test(s) || s.startsWith("/uploads/") || s.startsWith("uploads/");
+}
+
+function isImageUrl(s: string) {
+  const x = s.toLowerCase();
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(\?.*)?$/.test(x);
+}
+
+function isAudioUrl(s: string) {
+  const x = s.toLowerCase();
+  return /\.(webm|ogg|mp3|wav|m4a|aac)(\?.*)?$/.test(x);
+}
+
+function fmtTime(v?: string | Date) {
+  if (!v) return "";
+  const d = typeof v === "string" ? new Date(v) : v;
   if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
-function parsePayload(content: string): { kind: "text" | "image" | "audio" | "file"; url?: string; name?: string; text?: string } {
-  const c = String(content || "");
-  if (c.startsWith("__image__:")) return { kind: "image", url: c.slice(9).trim() };
-  if (c.startsWith("__audio__:")) return { kind: "audio", url: c.slice(9).trim() };
-  if (c.startsWith("__file__:")) {
-    const rest = c.slice(8).trim();
-    const [u, name] = rest.split("|");
-    return { kind: "file", url: (u || "").trim(), name: (name || "").trim() || undefined };
+async function httpSendMessage(conversationId: number, content: string, replyToId: number | null) {
+  const token = getAuthTokenLoose();
+  const body = JSON.stringify({ conversationId, content, replyToId: replyToId ?? null });
+
+  // tentiamo endpoint più probabili senza cambiare il backend
+  const tries: Array<{ url: string; method: string; body?: string; headers?: Record<string, string> }> = [
+    {
+      url: `${API_BASE_URL}/messages`,
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+    },
+    {
+      url: `${API_BASE_URL}/conversations/${conversationId}/messages`,
+      method: "POST",
+      body,
+      headers: { "Content-Type": "application/json" },
+    },
+  ];
+
+  let lastErr: any = null;
+
+  for (const t of tries) {
+    try {
+      const res = await fetch(t.url, {
+        method: t.method,
+        headers: {
+          ...(t.headers || {}),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: t.body,
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg = json?.error || json?.message || `Errore invio (${res.status})`;
+        throw new Error(msg);
+      }
+      return json;
+    } catch (e: any) {
+      lastErr = e;
+    }
   }
-  return { kind: "text", text: c };
+
+  throw lastErr || new Error("Errore invio messaggio");
 }
 
-function axiosErrorToText(e: any): string {
-  const status = e?.response?.status;
-  const data = e?.response?.data;
-  const msg = e?.message;
-  if (status) return `Errore invio (${status}) ${typeof data === "string" ? data : ""}`.trim();
-  return msg || "Errore invio";
-}
+async function uploadFileSmart(file: File, kind: "image" | "audio" | "file") {
+  const token = getAuthTokenLoose();
 
-function getConvId(props: any, incoming: any[]): number {
-  const candidates: any[] = [];
-  candidates.push(props?.conversationId);
-  candidates.push(props?.conversation?.id);
-  candidates.push(props?.selectedConversation?.id);
-  candidates.push(props?.selectedConversationId);
+  // Proviamo endpoint e fieldname tipici (senza cambiare struttura backend)
+  const attempts =
+    kind === "image"
+      ? [
+          { endpoint: "/upload/image", field: "image" },
+          { endpoint: "/upload/image", field: "file" },
+          { endpoint: "/upload/file", field: "file" },
+        ]
+      : kind === "audio"
+      ? [
+          { endpoint: "/upload/audio", field: "audio" },
+          { endpoint: "/upload/audio", field: "file" },
+          { endpoint: "/upload/file", field: "file" },
+        ]
+      : [
+          { endpoint: "/upload/file", field: "file" },
+          { endpoint: "/upload/upload", field: "file" },
+          { endpoint: "/upload/image", field: "file" },
+        ];
 
-  try {
-    const p = new URLSearchParams(window.location.search);
-    const cid = p.get("cid");
-    if (cid) candidates.push(cid);
-  } catch {}
+  let lastErr: any = null;
 
-  if (incoming?.[0]?.conversationId) candidates.push(incoming[0].conversationId);
+  for (const a of attempts) {
+    try {
+      const fd = new FormData();
+      fd.append(a.field, file, file.name);
 
-  for (const c of candidates) {
-    const n = Number(c);
-    if (Number.isFinite(n) && n > 0) return n;
+      const res = await fetch(`${API_BASE_URL}${a.endpoint}`, {
+        method: "POST",
+        headers: {
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: fd,
+      });
+
+      const json = await res.json().catch(() => null);
+      if (!res.ok) {
+        const msg = json?.error || json?.message || `Upload fallito (${res.status})`;
+        throw new Error(msg);
+      }
+
+      const u =
+        json?.url ||
+        json?.fileUrl ||
+        json?.path ||
+        json?.location ||
+        json?.data?.url ||
+        (typeof json === "string" ? json : null);
+
+      if (typeof u === "string" && u.trim()) return resolveUploadedUrl(u.trim());
+
+      throw new Error("Upload ok ma risposta senza URL");
+    } catch (e: any) {
+      lastErr = e;
+      // se 404, ha senso provare altri endpoint; se 400 “Unexpected field”, proviamo field diverso
+    }
   }
-  return 0;
+
+  throw lastErr || new Error("Upload fallito");
 }
 
-export default function ChatWindow(props: any) {
-  const me: User | null = props?.me || props?.user || props?.currentUser || null;
-  const otherUser: User | null = props?.otherUser || props?.other || props?.peerUser || props?.friend || null;
-
-  const incoming: MsgAny[] = Array.isArray(props?.messages) ? props.messages : [];
-  const [messages, setMessages] = useState<MsgAny[]>(incoming);
-
-  useEffect(() => {
-    setMessages(incoming);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [incoming?.length]);
-
-  const listRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    const el = listRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [messages.length]);
+export default function ChatWindow(props: {
+  conversationId?: number | null;
+  conversation?: any;
+  currentUser: any;
+  messages: any[];
+  typingUserId?: number | null;
+  onBack?: () => void;
+  onSendWithReply?: (content: string, replyToId: number | null) => Promise<void> | void;
+}) {
+  const conversationId = Number(props.conversationId || 0);
+  const msgs: Msg[] = Array.isArray(props.messages) ? (props.messages as any) : [];
 
   const [text, setText] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const onBack: (() => void) | undefined = props?.onBack;
-  const typingUserId: number | null = props?.typingUserId ?? null;
+  const [replyToId, setReplyToId] = useState<number | null>(null);
 
-  const conversationId: number = useMemo(() => getConvId(props, incoming), [props, incoming]);
+  // Microfono
+  const [recording, setRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
 
-  // ====== File picker ======
+  // File input (documenti + immagini)
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // ====== Audio recorder ======
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-  const chunksRef = useRef<BlobPart[]>([]);
-  const timerRef = useRef<number | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [recMs, setRecMs] = useState(0);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
-  async function doSendContent(content: string) {
+  useEffect(() => {
+    // autoscroll
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [msgs.length]);
+
+  const replyMsg = useMemo(() => (replyToId ? msgs.find((m) => m.id === replyToId) : null), [replyToId, msgs]);
+
+  function title() {
+    const c = props.conversation;
+    return c?.title || c?.name || "Chat";
+  }
+
+  async function sendContent(content: string) {
+    setErr(null);
     const c = content.trim();
     if (!c) return;
 
     if (!conversationId) {
-      setErr("Impossibile inviare: conversationId mancante (seleziona una chat e riprova).");
+      setErr("Impossibile inviare: conversationId mancante.");
       return;
     }
 
-    setErr(null);
     setBusy(true);
     try {
-      const created = await sendMessage(conversationId, c, null);
-      setMessages((prev) => [...prev, created as any]);
+      if (props.onSendWithReply) {
+        await props.onSendWithReply(c, replyToId);
+      } else {
+        await httpSendMessage(conversationId, c, replyToId);
+      }
       setText("");
+      setReplyToId(null);
     } catch (e: any) {
-      console.error("SEND ERROR", e);
-      setErr(axiosErrorToText(e));
+      setErr(e?.message || "Errore invio messaggio");
     } finally {
       setBusy(false);
     }
   }
 
-  async function handlePickFile(file: File) {
+  async function onPickFile(ev: React.ChangeEvent<HTMLInputElement>) {
+    const f = ev.target.files?.[0];
+    ev.target.value = "";
+    if (!f) return;
+
+    setErr(null);
     if (!conversationId) {
-      setErr("Impossibile inviare file: conversationId mancante.");
+      setErr("Apri una chat prima di inviare un file.");
       return;
     }
 
-    setErr(null);
     setBusy(true);
     try {
-      const mime = file.type || "";
-      let payload = "";
-
-      if (mime.startsWith("image/")) {
-        const up = await uploadImage(file);
-        payload = `__image__:${up.url}`;
-      } else if (mime.startsWith("audio/")) {
-        const up = await uploadAudio(file);
-        payload = `__audio__:${up.url}`;
-      } else {
-        const up = await uploadFile(file);
-        payload = `__file__:${up.url}|${file.name || "file"}`;
-      }
-
-      const created = await sendMessage(conversationId, payload, null);
-      setMessages((prev) => [...prev, created as any]);
+      const kind: "image" | "file" = f.type?.startsWith("image/") ? "image" : "file";
+      const url = await uploadFileSmart(f, kind);
+      // inviamo il link come contenuto (la UI lo renderizza come immagine/audio/link)
+      await sendContent(url);
     } catch (e: any) {
-      console.error("FILE SEND ERROR", e);
-      setErr(axiosErrorToText(e));
+      setErr(e?.message || "Errore invio file");
     } finally {
       setBusy(false);
     }
@@ -156,145 +259,201 @@ export default function ChatWindow(props: any) {
   async function startRecording() {
     setErr(null);
 
-    if (!conversationId) {
-      setErr("Apri una chat prima di registrare un vocale.");
-      return;
-    }
-
     if (!navigator.mediaDevices?.getUserMedia) {
-      setErr("Registrazione vocale non supportata su questo browser.");
+      setErr("Microfono non supportato su questo dispositivo/browser.");
       return;
     }
 
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
+      mediaStreamRef.current = stream;
 
-      // scegliamo un mimeType supportato se possibile
-      const candidates = [
-        "audio/webm;codecs=opus",
-        "audio/webm",
-        "audio/ogg;codecs=opus",
-        "audio/ogg",
-      ];
-      const mrAny: any = window as any;
-      const mimeType = mrAny.MediaRecorder?.isTypeSupported
-        ? candidates.find((m) => mrAny.MediaRecorder.isTypeSupported(m)) || ""
-        : "";
+      const mimeCandidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg"];
+      let mimeType = "";
+      for (const m of mimeCandidates) {
+        if ((window as any).MediaRecorder?.isTypeSupported?.(m)) {
+          mimeType = m;
+          break;
+        }
+      }
 
       const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
-      recorderRef.current = rec;
       chunksRef.current = [];
-      setRecMs(0);
 
-      rec.ondataavailable = (e: BlobEvent) => {
+      rec.ondataavailable = (e) => {
         if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
       };
 
-      rec.onstop = async () => {
+      rec.onstop = () => {
+        // stop tracks
         try {
-          // stop stream
-          stream.getTracks().forEach((t) => t.stop());
-          streamRef.current = null;
-
-          const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
-          const ext = (rec.mimeType || "").includes("ogg") ? "ogg" : "webm";
-          const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: blob.type || "audio/webm" });
-
-          setBusy(true);
-          const up = await uploadAudio(file);
-          const payload = `__audio__:${up.url}`;
-          const created = await sendMessage(conversationId, payload, null);
-          setMessages((prev) => [...prev, created as any]);
-        } catch (e: any) {
-          setErr(e?.message || "Errore invio vocale");
-        } finally {
-          setBusy(false);
+          mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+        } catch {
+          // ignore
         }
+        mediaStreamRef.current = null;
       };
 
-      rec.start(250);
+      mediaRecorderRef.current = rec;
+      rec.start();
       setRecording(true);
-
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      timerRef.current = window.setInterval(() => setRecMs((p) => p + 200), 200);
     } catch (e: any) {
-      setErr(e?.message || "Permesso microfono negato o errore registrazione.");
+      setErr(e?.message || "Permesso microfono negato o errore avvio registrazione");
     }
   }
 
-  function stopRecording() {
-    try {
-      if (timerRef.current) window.clearInterval(timerRef.current);
-      timerRef.current = null;
+  async function stopRecordingAndSend() {
+    setErr(null);
+    const rec = mediaRecorderRef.current;
+    if (!rec) {
+      setRecording(false);
+      return;
+    }
 
+    setBusy(true);
+
+    try {
+      const blob: Blob = await new Promise((resolve) => {
+        const onStop = () => {
+          rec.removeEventListener("stop", onStop as any);
+          const b = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+          resolve(b);
+        };
+        rec.addEventListener("stop", onStop as any);
+        rec.stop();
+      });
+
+      mediaRecorderRef.current = null;
       setRecording(false);
 
-      const rec = recorderRef.current;
-      recorderRef.current = null;
+      const ext = blob.type.includes("ogg") ? "ogg" : blob.type.includes("mp3") ? "mp3" : "webm";
+      const file = new File([blob], `voice-${Date.now()}.${ext}`, { type: blob.type || "audio/webm" });
 
-      if (rec && rec.state !== "inactive") rec.stop();
+      if (!conversationId) throw new Error("Apri una chat prima di inviare un vocale.");
+
+      const url = await uploadFileSmart(file, "audio");
+      await sendContent(url);
     } catch (e: any) {
-      setErr(e?.message || "Errore stop registrazione");
+      setErr(e?.message || "Errore invio vocale");
+      setRecording(false);
+      try {
+        mediaStreamRef.current?.getTracks().forEach((t) => t.stop());
+      } catch {
+        // ignore
+      }
+      mediaStreamRef.current = null;
+      mediaRecorderRef.current = null;
+    } finally {
+      setBusy(false);
     }
   }
 
-  const iconBtn: React.CSSProperties = {
-    width: 42,
-    height: 42,
+  const composerBtn: React.CSSProperties = {
+    width: 40,
+    height: 40,
     borderRadius: 12,
     border: "1px solid #2a2a2a",
-    background: "var(--tiko-bg-dark)",
+    background: "transparent",
     color: "var(--tiko-text)",
-    fontWeight: 950,
     cursor: "pointer",
+    fontSize: 18,
+    fontWeight: 900,
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+
+  const sendBtn: React.CSSProperties = {
+    height: 40,
+    borderRadius: 12,
+    border: "1px solid var(--tiko-mint)",
+    background: "var(--tiko-mint)",
+    color: "#000",
+    cursor: "pointer",
+    fontWeight: 950,
+    padding: "0 14px",
+  };
+
+  const bubbleBase: React.CSSProperties = {
+    borderRadius: 14,
+    padding: "10px 12px",
+    maxWidth: "82%",
+    border: "1px solid #232323",
+    wordBreak: "break-word",
+    whiteSpace: "pre-wrap",
   };
 
   return (
-    <div style={{ height: "100%", display: "flex", flexDirection: "column", minHeight: 0 }}>
-      <div style={{ padding: "10px 12px", borderBottom: "1px solid #222", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "var(--tiko-bg-card)" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-          {onBack && (
-            <button type="button" style={iconBtn} onClick={onBack} aria-label="Indietro">
-              ←
-            </button>
-          )}
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontWeight: 950, color: "var(--tiko-text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-              {otherUser?.displayName || otherUser?.username || "Chat"}
-            </div>
-            {typingUserId ? <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>sta scrivendo…</div> : null}
-          </div>
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", minHeight: 0 }}>
+      <div
+        style={{
+          padding: 10,
+          borderBottom: "1px solid #222",
+          background: "var(--tiko-bg-card)",
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+        }}
+      >
+        {props.onBack ? (
+          <button type="button" onClick={props.onBack} style={{ ...composerBtn, width: 44 }} aria-label="Indietro">
+            ←
+          </button>
+        ) : null}
+        <div style={{ fontWeight: 950, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{title()}</div>
+        <div style={{ marginLeft: "auto", color: "var(--tiko-text-dim)", fontSize: 12 }}>
+          {props.typingUserId ? "Sta scrivendo..." : ""}
         </div>
       </div>
 
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12, background: "var(--tiko-bg-dark)" }}>
-        {messages.map((m: any) => {
-          const mine = me?.id && Number(m.senderId) === Number(me.id);
-          const p = parsePayload(String(m.content ?? ""));
-          const deleted = !!m.deletedAt;
+      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12, background: "var(--tiko-bg-gray)" }}>
+        {msgs.map((m) => {
+          const mine = Number(m.senderId) === Number(props.currentUser?.id);
+          const content = m.deletedAt ? "Messaggio eliminato" : m.content || "";
+          const showUrl = looksLikeUrl(content);
+          const url = showUrl ? resolveUploadedUrl(content) : "";
 
           return (
             <div key={m.id} style={{ display: "flex", justifyContent: mine ? "flex-end" : "flex-start", marginBottom: 10 }}>
-              <div style={{ maxWidth: "78%", padding: "10px 12px", borderRadius: 16, border: "1px solid #2a2a2a", background: mine ? "rgba(122,41,255,0.18)" : "rgba(58,190,255,0.12)", color: "var(--tiko-text)" }}>
-                {deleted ? (
-                  <i style={{ color: "var(--tiko-text-dim)" }}>Messaggio eliminato</i>
-                ) : p.kind === "text" ? (
-                  p.text
-                ) : p.kind === "image" ? (
-                  <a href={p.url} target="_blank" rel="noreferrer">
-                    <img src={p.url} alt="img" style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #333" }} />
+              <div
+                style={{
+                  ...bubbleBase,
+                  background: mine ? "rgba(58,190,255,0.10)" : "var(--tiko-bg-card)",
+                }}
+                onDoubleClick={() => setReplyToId(m.id)}
+                title="Doppio tap/click per Rispondi"
+              >
+                {m.replyToId ? (
+                  <div style={{ fontSize: 12, opacity: 0.85, borderLeft: "3px solid #3ABEFF", paddingLeft: 8, marginBottom: 8 }}>
+                    Risposta a #{m.replyToId}
+                  </div>
+                ) : null}
+
+                {showUrl && isImageUrl(url) ? (
+                  <a href={url} target="_blank" rel="noreferrer">
+                    <img src={url} alt="img" style={{ maxWidth: "100%", borderRadius: 12, border: "1px solid #222" }} />
                   </a>
-                ) : p.kind === "audio" ? (
-                  <audio controls src={p.url} style={{ width: "100%" }} />
+                ) : showUrl && isAudioUrl(url) ? (
+                  <audio controls src={url} style={{ width: "100%" }} />
+                ) : showUrl ? (
+                  <a href={url} target="_blank" rel="noreferrer" style={{ color: "#3ABEFF", fontWeight: 900 }}>
+                    📎 Apri file
+                  </a>
                 ) : (
-                  <a href={p.url} target="_blank" rel="noreferrer" style={{ color: "#3ABEFF", fontWeight: 900 }}>
-                    Scarica file{p.name ? `: ${p.name}` : ""}
-                  </a>
+                  <div style={{ opacity: m.deletedAt ? 0.7 : 1 }}>{content}</div>
                 )}
 
-                <div style={{ marginTop: 6, fontSize: 11, color: "var(--tiko-text-dim)", display: "flex", justifyContent: "space-between", gap: 10 }}>
-                  <span>{formatTime(m.createdAt)}</span>
+                <div style={{ marginTop: 6, display: "flex", justifyContent: "flex-end", gap: 10, fontSize: 11, color: "var(--tiko-text-dim)" }}>
+                  <span>{fmtTime(m.createdAt)}</span>
+                  {m.editedAt ? <span>(mod.)</span> : null}
+                  <button
+                    type="button"
+                    onClick={() => setReplyToId(m.id)}
+                    style={{ background: "transparent", border: "none", color: "var(--tiko-text-dim)", cursor: "pointer" }}
+                    title="Rispondi"
+                  >
+                    ↩
+                  </button>
                 </div>
               </div>
             </div>
@@ -302,79 +461,89 @@ export default function ChatWindow(props: any) {
         })}
       </div>
 
-      <div style={{ borderTop: "1px solid #222", background: "var(--tiko-bg-card)", padding: 10, position: "sticky", bottom: 0 }}>
-        {err && (
-          <div style={{ marginBottom: 8, padding: "8px 10px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 850 }}>
-            {err}
-          </div>
-        )}
+      {err ? (
+        <div style={{ padding: "10px 12px", borderTop: "1px solid #222", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 900 }}>
+          {err}
+        </div>
+      ) : null}
 
-        <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-          {/* 📎 documenti: input file senza accept/capture */}
-          <button type="button" style={{ ...iconBtn, opacity: busy ? 0.7 : 1 }} onClick={() => fileInputRef.current?.click()} disabled={busy || recording} title="Invia file">
+      {replyMsg ? (
+        <div style={{ padding: 10, borderTop: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ flex: 1, minWidth: 0, fontSize: 13, color: "var(--tiko-text)" }}>
+            <strong>Rispondi:</strong>{" "}
+            <span style={{ color: "var(--tiko-text-dim)" }}>
+              {String(replyMsg.content || "").slice(0, 80)}
+              {String(replyMsg.content || "").length > 80 ? "…" : ""}
+            </span>
+          </div>
+          <button type="button" style={{ ...composerBtn, width: 44 }} onClick={() => setReplyToId(null)} aria-label="Annulla risposta">
+            ×
+          </button>
+        </div>
+      ) : null}
+
+      <div style={{ padding: 10, borderTop: "1px solid #222", background: "var(--tiko-bg-card)" }}>
+        <input
+          ref={fileInputRef}
+          type="file"
+          // IMPORTANTISSIMO: niente accept="image/*" -> così non è solo camera, ma anche documenti
+          style={{ display: "none" }}
+          onChange={onPickFile}
+        />
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            type="button"
+            style={composerBtn}
+            onClick={() => fileInputRef.current?.click()}
+            disabled={busy}
+            title="Invia file (documenti, immagini, ecc.)"
+            aria-label="Invia file"
+          >
             📎
           </button>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            style={{ display: "none" }}
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handlePickFile(f);
-              e.currentTarget.value = "";
-            }}
-          />
-
-          {/* 🎙️ vocale: toggle start/stop */}
           <button
             type="button"
             style={{
-              ...iconBtn,
-              background: recording ? "rgba(255,59,48,0.18)" : "var(--tiko-bg-dark)",
+              ...composerBtn,
               borderColor: recording ? "#ff3b30" : "#2a2a2a",
+              color: recording ? "#ff3b30" : "var(--tiko-text)",
             }}
+            onClick={() => (recording ? stopRecordingAndSend() : startRecording())}
             disabled={busy}
-            onClick={() => (recording ? stopRecording() : startRecording())}
-            title={recording ? `Stop (${(recMs / 1000).toFixed(1)}s)` : "Registra vocale"}
+            title={recording ? "Stop & invia vocale" : "Registra vocale"}
+            aria-label="Microfono"
           >
-            🎙️
+            {recording ? "■" : "🎙️"}
           </button>
 
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={recording ? `Registrazione… ${(recMs / 1000).toFixed(1)}s` : "Scrivi un messaggio…"}
+            placeholder="Scrivi un messaggio…"
             style={{
               flex: 1,
+              minHeight: 40,
+              maxHeight: 110,
               resize: "none",
-              minHeight: 42,
-              maxHeight: 120,
-              padding: "10px 10px",
+              padding: "10px 12px",
               borderRadius: 12,
               border: "1px solid #2a2a2a",
               background: "var(--tiko-bg-dark)",
               color: "var(--tiko-text)",
               outline: "none",
-              fontSize: 14,
-              lineHeight: 1.25,
             }}
-            disabled={busy || recording}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                doSendContent(text);
+                if (!busy) sendContent(text);
               }
             }}
           />
 
-          <button
-            type="button"
-            style={{ minWidth: 80, height: 42, borderRadius: 12, border: "1px solid #2a2a2a", background: "#7A29FF", color: "#fff", fontWeight: 950, cursor: "pointer", opacity: busy ? 0.7 : 1 }}
-            disabled={busy || recording || !text.trim()}
-            onClick={() => doSendContent(text)}
-          >
-            {busy ? "…" : "Invia"}
+          <button type="button" style={sendBtn} disabled={busy || !text.trim()} onClick={() => sendContent(text)} aria-label="Invia">
+            Invia
           </button>
         </div>
       </div>

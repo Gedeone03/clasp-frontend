@@ -42,7 +42,7 @@ const MOOD_OPTIONS = [
   { value: "TRISTE", label: "Triste" },
   { value: "RILASSATO", label: "Rilassato" },
   { value: "ANSIOSO", label: "Ansioso" },
-  { value: "ENTUSIASTA", label: "Entusiasta" },
+  { value: "ENTUSIASTA", label: "EntusIasta" },
   { value: "ARRABBIATO", label: "Arrabbiato" },
   { value: "SOLO", label: "Solo" },
 ];
@@ -60,18 +60,14 @@ export default function HomePage() {
   const { user } = useAuth();
   const isMobile = useIsMobile(900);
 
-  // ===== Chat =====
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // ✅ Mobile “pagine dedicate” (solo mobile)
-  // - chats: lista conversazioni
-  // - search: pagina ricerca utenti
-  // - chat: pagina chat
+  // SOLO MOBILE: pagine dedicate
   const [mobileTab, setMobileTab] = useState<"chats" | "search" | "chat">("chats");
 
-  // ===== Ricerca utenti (sopra lista chat su desktop, pagina dedicata su mobile) =====
+  // Ricerca utenti (rimane in Home come prima: desktop sopra chat list, mobile in pagina dedicata)
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -85,7 +81,7 @@ export default function HomePage() {
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
-  // ===== UI styles (invariati) =====
+  // Stili (invariati)
   const card: React.CSSProperties = {
     background: "var(--tiko-bg-card)",
     border: "1px solid #222",
@@ -120,7 +116,6 @@ export default function HomePage() {
     borderColor: "var(--tiko-mint)",
   };
 
-  // Piccolo stile bottone header mobile (solo funzione, UI minimale)
   const headerBtn: React.CSSProperties = {
     ...btn,
     padding: "8px 10px",
@@ -128,7 +123,7 @@ export default function HomePage() {
     fontWeight: 950,
   };
 
-  // ===== Load conversations =====
+  // Carica conversazioni
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -143,7 +138,7 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // ===== Load messages when selecting a conversation =====
+  // Carica messaggi quando selezioni una conversazione
   useEffect(() => {
     if (!selectedConversation) return;
     (async () => {
@@ -156,13 +151,13 @@ export default function HomePage() {
     })();
   }, [selectedConversation?.id]);
 
-  // ✅ LIVE MESSAGES (invariato): ricarica la chat aperta ogni 2 secondi
+  // Live polling (come avevamo fatto): ogni 2s SOLO per chat aperta
   useEffect(() => {
     if (!user) return;
     const convId = Number(selectedConversation?.id || 0);
     if (!convId) return;
 
-    // su mobile, facciamolo solo quando sei nella pagina chat
+    // su mobile, poll solo quando sei nella pagina chat
     if (isMobile && mobileTab !== "chat") return;
 
     let alive = true;
@@ -198,7 +193,6 @@ export default function HomePage() {
     };
   }, [user?.id, selectedConversation?.id, isMobile, mobileTab]);
 
-  // ===== Search =====
   async function doSearch() {
     if (!user) return;
 
@@ -392,14 +386,12 @@ export default function HomePage() {
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // ===== MOBILE: pagine dedicate (chats / search / chat) =====
-  // Nota: NON tocchiamo desktop.
+  // ===== MOBILE: pagina dedicata Chat e Cerca con freccia indietro =====
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          {/* Header mobile (solo funzione di navigazione pagine) */}
           <div
             style={{
               padding: 10,
@@ -421,7 +413,6 @@ export default function HomePage() {
               </>
             ) : mobileTab === "chat" ? (
               <>
-                {/* Il back vero lo gestisce ChatWindow, qui teniamo header neutro */}
                 <button type="button" style={headerBtn} onClick={() => setMobileTab("chats")} aria-label="Indietro">
                   ←
                 </button>
@@ -440,10 +431,8 @@ export default function HomePage() {
 
           <div style={{ flex: 1, minHeight: 0 }}>
             {mobileTab === "search" ? (
-              // Pagina dedicata Ricerca
               <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
             ) : mobileTab === "chat" ? (
-              // Pagina dedicata Chat
               <ChatWindow
                 conversationId={selectedConversation?.id}
                 conversation={selectedConversation}
@@ -452,7 +441,6 @@ export default function HomePage() {
                 onBack={() => setMobileTab("chats")}
               />
             ) : (
-              // Pagina lista conversazioni
               <ConversationList
                 conversations={conversations}
                 selectedConversationId={selectedConversation?.id ?? null}
@@ -468,13 +456,12 @@ export default function HomePage() {
     );
   }
 
-  // ===== DESKTOP: struttura invariata (ricerca sopra + chat list sotto a sinistra, chat a destra) =====
+  // ===== DESKTOP: struttura invariata =====
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
-        {/* COLONNA SINISTRA UNICA: Ricerca sopra + Chat list sotto */}
         <div
           style={{
             width: "clamp(360px, 34vw, 520px)",
@@ -486,12 +473,10 @@ export default function HomePage() {
             minHeight: 0,
           }}
         >
-          {/* Ricerca sopra */}
           <div style={{ borderBottom: "1px solid #222", background: "var(--tiko-bg-dark)", overflowY: "auto" }}>
             {SearchBlock}
           </div>
 
-          {/* Chat list sotto */}
           <div style={{ flex: 1, minHeight: 0 }}>
             <ConversationList
               conversations={conversations}
@@ -501,7 +486,6 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* COLONNA DESTRA: Chat */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <ChatWindow
             conversationId={selectedConversation?.id}
