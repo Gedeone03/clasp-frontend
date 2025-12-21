@@ -217,7 +217,7 @@ export default function ChatWindow(props: any) {
       setRecording(true);
 
       if (timerRef.current) window.clearInterval(timerRef.current);
-      timerRef.current = window.setInterval(() => setRecMs((p) => p + 250), 250);
+      timerRef.current = window.setInterval(() => setRecMs((p) => p + 200), 200);
     } catch (e: any) {
       setErr(e?.message || "Permesso microfono negato o errore registrazione.");
     }
