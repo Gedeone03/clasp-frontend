@@ -26,15 +26,23 @@ export default function ConversationList({
 
   return (
     <div style={{ height: "100%", overflowY: "auto" }}>
-      {conversations.map((conv) => {
+      {conversations.map((conv: any) => {
         const unread = unreadCounts?.[conv.id] ?? 0;
 
-        const other = conv.participants
-          ?.map((p: any) => p.user)
-          ?.find((u: any) => u && u.id !== myId);
+        // prova a ricavare l’altro utente
+        const other =
+          conv?.participants
+            ?.map((p: any) => p?.user)
+            ?.find((u: any) => u && u.id !== myId) || null;
 
-        const last = conv.messages?.[0] as any | undefined;
-        const lastText = last?.deletedAt ? "Messaggio eliminato" : last?.content || "";
+        // preview ultimo messaggio
+        const last =
+          conv?.lastMessage ||
+          (Array.isArray(conv?.messages) && conv.messages.length ? conv.messages[0] : null);
+
+        const preview = last?.deletedAt
+          ? "Messaggio eliminato"
+          : (last?.content || "").toString();
 
         const isSelected = selectedConversationId === conv.id;
 
@@ -54,15 +62,31 @@ export default function ConversationList({
             }}
           >
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 13, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {other?.displayName || "Conversazione"}
+              <div
+                style={{
+                  fontWeight: 900,
+                  fontSize: 13,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {other?.displayName || other?.username || "Conversazione"}
               </div>
-              <div style={{ fontSize: 12, color: "var(--tiko-text-dim)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                {clip(lastText, 42)}
+
+              <div
+                style={{
+                  fontSize: 12,
+                  color: "var(--tiko-text-dim)",
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                }}
+              >
+                {clip(preview, 46)}
               </div>
             </div>
 
-            {/* Badge unread */}
             {unread > 0 && (
               <div
                 style={{
@@ -73,7 +97,7 @@ export default function ConversationList({
                   background: "#ff3b30",
                   color: "#fff",
                   fontSize: 12,
-                  fontWeight: 800,
+                  fontWeight: 950,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -89,7 +113,9 @@ export default function ConversationList({
       })}
 
       {conversations.length === 0 && (
-        <div style={{ padding: 12, color: "var(--tiko-text-dim)" }}>Nessuna chat</div>
+        <div style={{ padding: 12, color: "var(--tiko-text-dim)" }}>
+          Nessuna chat
+        </div>
       )}
     </div>
   );
