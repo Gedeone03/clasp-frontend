@@ -36,6 +36,28 @@ function axiosErrorToText(e: any): string {
   return msg || "Errore invio";
 }
 
+function getConvId(props: any, incoming: any[]): number {
+  const candidates: any[] = [];
+  candidates.push(props?.conversationId);
+  candidates.push(props?.conversation?.id);
+  candidates.push(props?.selectedConversation?.id);
+  candidates.push(props?.selectedConversationId);
+
+  try {
+    const p = new URLSearchParams(window.location.search);
+    const cid = p.get("cid");
+    if (cid) candidates.push(cid);
+  } catch {}
+
+  if (incoming?.[0]?.conversationId) candidates.push(incoming[0].conversationId);
+
+  for (const c of candidates) {
+    const n = Number(c);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return 0;
+}
+
 export default function ChatWindow(props: any) {
   const me: User | null = props?.me || props?.user || props?.currentUser || null;
   const otherUser: User | null = props?.otherUser || props?.other || props?.peerUser || props?.friend || null;
@@ -62,44 +84,18 @@ export default function ChatWindow(props: any) {
   const onBack: (() => void) | undefined = props?.onBack;
   const typingUserId: number | null = props?.typingUserId ?? null;
 
-  // ✅ risoluzione convId SUPER robusta (non cambia UI)
-  const conversationId: number = useMemo(() => {
-    const candidates: any[] = [];
+  const conversationId: number = useMemo(() => getConvId(props, incoming), [props, incoming]);
 
-    candidates.push(props?.conversationId);
-    candidates.push(props?.conversation?.id);
-    candidates.push(props?.selectedConversation?.id);
-    candidates.push(props?.selectedConversationId);
-    candidates.push(props?.conversation?.conversationId);
-    candidates.push(props?.selectedConversation?.conversationId);
-
-    // fallback da URL (spesso usato: ?cid=123)
-    try {
-      const p = new URLSearchParams(window.location.search);
-      const cid = p.get("cid");
-      if (cid) candidates.push(cid);
-    } catch {}
-
-    // fallback dai messaggi (se presenti)
-    try {
-      const first = incoming?.[0];
-      if (first?.conversationId) candidates.push(first.conversationId);
-    } catch {}
-
-    for (const c of candidates) {
-      const n = Number(c);
-      if (Number.isFinite(n) && n > 0) return n;
-    }
-    return 0;
-  }, [
-    props?.conversationId,
-    props?.conversation,
-    props?.selectedConversation,
-    props?.selectedConversationId,
-    incoming,
-  ]);
-
+  // ====== File picker ======
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // ====== Audio recorder ======
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<BlobPart[]>([]);
+  const timerRef = useRef<number | null>(null);
+  const [recording, setRecording] = useState(false);
+  const [recMs, setRecMs] = useState(0);
 
   async function doSendContent(content: string) {
     const c = content.trim();
@@ -114,13 +110,7 @@ export default function ChatWindow(props: any) {
     setBusy(true);
     try {
       const created = await sendMessage(conversationId, c, null);
-
-      // aggiorno UI subito (senza cambiare layout)
-      setMessages((prev) => {
-        const exists = prev.some((m: any) => Number(m?.id) === Number(created?.id));
-        return exists ? prev : [...prev, created as any];
-      });
-
+      setMessages((prev) => [...prev, created as any]);
       setText("");
     } catch (e: any) {
       console.error("SEND ERROR", e);
@@ -154,15 +144,98 @@ export default function ChatWindow(props: any) {
       }
 
       const created = await sendMessage(conversationId, payload, null);
-      setMessages((prev) => {
-        const exists = prev.some((m: any) => Number(m?.id) === Number(created?.id));
-        return exists ? prev : [...prev, created as any];
-      });
+      setMessages((prev) => [...prev, created as any]);
     } catch (e: any) {
       console.error("FILE SEND ERROR", e);
       setErr(axiosErrorToText(e));
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function startRecording() {
+    setErr(null);
+
+    if (!conversationId) {
+      setErr("Apri una chat prima di registrare un vocale.");
+      return;
+    }
+
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setErr("Registrazione vocale non supportata su questo browser.");
+      return;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+
+      // scegliamo un mimeType supportato se possibile
+      const candidates = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/ogg",
+      ];
+      const mrAny: any = window as any;
+      const mimeType = mrAny.MediaRecorder?.isTypeSupported
+        ? candidates.find((m) => mrAny.MediaRecorder.isTypeSupported(m)) || ""
+        : "";
+
+      const rec = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      recorderRef.current = rec;
+      chunksRef.current = [];
+      setRecMs(0);
+
+      rec.ondataavailable = (e: BlobEvent) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+
+      rec.onstop = async () => {
+        try {
+          // stop stream
+          stream.getTracks().forEach((t) => t.stop());
+          streamRef.current = null;
+
+          const blob = new Blob(chunksRef.current, { type: rec.mimeType || "audio/webm" });
+          const ext = (rec.mimeType || "").includes("ogg") ? "ogg" : "webm";
+          const file = new File([blob], `voice_${Date.now()}.${ext}`, { type: blob.type || "audio/webm" });
+
+          setBusy(true);
+          const up = await uploadAudio(file);
+          const payload = `__audio__:${up.url}`;
+          const created = await sendMessage(conversationId, payload, null);
+          setMessages((prev) => [...prev, created as any]);
+        } catch (e: any) {
+          setErr(e?.message || "Errore invio vocale");
+        } finally {
+          setBusy(false);
+        }
+      };
+
+      rec.start(250);
+      setRecording(true);
+
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      timerRef.current = window.setInterval(() => setRecMs((p) => p + 250), 250);
+    } catch (e: any) {
+      setErr(e?.message || "Permesso microfono negato o errore registrazione.");
+    }
+  }
+
+  function stopRecording() {
+    try {
+      if (timerRef.current) window.clearInterval(timerRef.current);
+      timerRef.current = null;
+
+      setRecording(false);
+
+      const rec = recorderRef.current;
+      recorderRef.current = null;
+
+      if (rec && rec.state !== "inactive") rec.stop();
+    } catch (e: any) {
+      setErr(e?.message || "Errore stop registrazione");
     }
   }
 
@@ -237,11 +310,11 @@ export default function ChatWindow(props: any) {
         )}
 
         <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-          <button type="button" style={{ ...iconBtn, opacity: busy ? 0.7 : 1 }} onClick={() => fileInputRef.current?.click()} disabled={busy} title="Invia file">
+          {/* 📎 documenti: input file senza accept/capture */}
+          <button type="button" style={{ ...iconBtn, opacity: busy ? 0.7 : 1 }} onClick={() => fileInputRef.current?.click()} disabled={busy || recording} title="Invia file">
             📎
           </button>
 
-          {/* ✅ NIENTE accept=image/* e NIENTE capture -> su mobile compaiono anche Documenti */}
           <input
             ref={fileInputRef}
             type="file"
@@ -253,10 +326,25 @@ export default function ChatWindow(props: any) {
             }}
           />
 
+          {/* 🎙️ vocale: toggle start/stop */}
+          <button
+            type="button"
+            style={{
+              ...iconBtn,
+              background: recording ? "rgba(255,59,48,0.18)" : "var(--tiko-bg-dark)",
+              borderColor: recording ? "#ff3b30" : "#2a2a2a",
+            }}
+            disabled={busy}
+            onClick={() => (recording ? stopRecording() : startRecording())}
+            title={recording ? `Stop (${(recMs / 1000).toFixed(1)}s)` : "Registra vocale"}
+          >
+            🎙️
+          </button>
+
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Scrivi un messaggio…"
+            placeholder={recording ? `Registrazione… ${(recMs / 1000).toFixed(1)}s` : "Scrivi un messaggio…"}
             style={{
               flex: 1,
               resize: "none",
@@ -271,7 +359,7 @@ export default function ChatWindow(props: any) {
               fontSize: 14,
               lineHeight: 1.25,
             }}
-            disabled={busy}
+            disabled={busy || recording}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
@@ -283,7 +371,7 @@ export default function ChatWindow(props: any) {
           <button
             type="button"
             style={{ minWidth: 80, height: 42, borderRadius: 12, border: "1px solid #2a2a2a", background: "#7A29FF", color: "#fff", fontWeight: 950, cursor: "pointer", opacity: busy ? 0.7 : 1 }}
-            disabled={busy || !text.trim()}
+            disabled={busy || recording || !text.trim()}
             onClick={() => doSendContent(text)}
           >
             {busy ? "…" : "Invia"}
