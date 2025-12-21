@@ -5,16 +5,15 @@ import {
   login as apiLogin,
   register as apiRegister,
   fetchMe,
-  setAuthToken,
   loadAuthTokenFromStorage,
+  setAuthToken,
 } from "./api";
 
 interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (emailOrUsername: string, password: string) => Promise<void>;
-  // register accetta sia stile vecchio (parametri) sia stile nuovo (oggetto)
-  register: (...args: any[]) => Promise<void>;
+  register: (data: any) => Promise<void>;
   logout: () => void;
   refreshMe: () => Promise<void>;
   setUser: (u: User | null) => void;
@@ -27,71 +26,54 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   async function refreshMe() {
-    try {
-      const me = await fetchMe();
-      setUser(me);
-    } catch {
-      setUser(null);
-    }
+    const me = await fetchMe();
+    setUser(me);
+    try { localStorage.setItem("user", JSON.stringify(me)); } catch {}
   }
 
   useEffect(() => {
-    // ✅ importantissimo: ricarica token dallo storage al boot
+    // ✅ ripristina token e applica Authorization all'avvio
     loadAuthTokenFromStorage();
 
-    const init = async () => {
+    (async () => {
       try {
+        // se token valido, /me funziona e popola user
         await refreshMe();
+      } catch {
+        setUser(null);
       } finally {
         setLoading(false);
       }
-    };
-
-    init();
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const handleAuthSuccess = (data: AuthResponse) => {
+  function handleAuthSuccess(data: AuthResponse) {
     setAuthToken(data.token);
     setUser(data.user);
-  };
+    try { localStorage.setItem("user", JSON.stringify(data.user)); } catch {}
+  }
 
   const login = async (emailOrUsername: string, password: string) => {
     setLoading(true);
     try {
       const data = await apiLogin({ emailOrUsername, password });
       handleAuthSuccess(data);
+
+      // ✅ conferma immediata che il token è valido lato backend
+      try { await refreshMe(); } catch {}
     } finally {
       setLoading(false);
     }
   };
 
-  const register = async (...args: any[]) => {
+  const register = async (data: any) => {
     setLoading(true);
     try {
-      // stile nuovo: register({ ... })
-      if (args.length === 1 && typeof args[0] === "object") {
-        const data = await apiRegister(args[0]);
-        handleAuthSuccess(data);
-        return;
-      }
+      const resp = await apiRegister(data);
+      handleAuthSuccess(resp);
 
-      // stile vecchio: register(email, password, displayName, username, purpose?, city?, area?)
-      const [email, password, displayName, username, purpose, city, area] = args;
-      const data = await apiRegister({
-        email,
-        password,
-        displayName,
-        username,
-        // purpose non più obbligatorio: lo passiamo solo se c’è
-        ...(purpose ? { purpose } : {}),
-        ...(city ? { city } : {}),
-        ...(area ? { area } : {}),
-        // se la UI lo richiede, di default mettiamo true
-        termsAccepted: true,
-      } as any);
-
-      handleAuthSuccess(data);
+      try { await refreshMe(); } catch {}
     } finally {
       setLoading(false);
     }
@@ -100,6 +82,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const logout = () => {
     setAuthToken(null);
     setUser(null);
+    try { localStorage.removeItem("user"); } catch {}
   };
 
   return (
