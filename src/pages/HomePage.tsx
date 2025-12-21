@@ -65,10 +65,13 @@ export default function HomePage() {
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // ===== Mobile tabs =====
+  // ✅ Mobile “pagine dedicate” (solo mobile)
+  // - chats: lista conversazioni
+  // - search: pagina ricerca utenti
+  // - chat: pagina chat
   const [mobileTab, setMobileTab] = useState<"chats" | "search" | "chat">("chats");
 
-  // ===== Ricerca utenti (sopra lista chat) =====
+  // ===== Ricerca utenti (sopra lista chat su desktop, pagina dedicata su mobile) =====
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -82,7 +85,7 @@ export default function HomePage() {
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
-  // ===== UI styles (NON cambiamo grafica/struttura) =====
+  // ===== UI styles (invariati) =====
   const card: React.CSSProperties = {
     background: "var(--tiko-bg-card)",
     border: "1px solid #222",
@@ -117,6 +120,14 @@ export default function HomePage() {
     borderColor: "var(--tiko-mint)",
   };
 
+  // Piccolo stile bottone header mobile (solo funzione, UI minimale)
+  const headerBtn: React.CSSProperties = {
+    ...btn,
+    padding: "8px 10px",
+    borderRadius: 12,
+    fontWeight: 950,
+  };
+
   // ===== Load conversations =====
   useEffect(() => {
     if (!user) return;
@@ -145,16 +156,13 @@ export default function HomePage() {
     })();
   }, [selectedConversation?.id]);
 
-  // ✅ LIVE MESSAGES (ripristino): ricarica la chat aperta ogni 2 secondi
-  // - Non cambia UI
-  // - Evita richieste concorrenti
-  // - Forza un refresh quando torni sulla tab/app
+  // ✅ LIVE MESSAGES (invariato): ricarica la chat aperta ogni 2 secondi
   useEffect(() => {
     if (!user) return;
     const convId = Number(selectedConversation?.id || 0);
     if (!convId) return;
 
-    // su mobile, facciamolo solo quando sei davvero dentro la chat
+    // su mobile, facciamolo solo quando sei nella pagina chat
     if (isMobile && mobileTab !== "chat") return;
 
     let alive = true;
@@ -175,11 +183,9 @@ export default function HomePage() {
       }
     };
 
-    // primo refresh subito, poi ogni 2 secondi
     tick();
     const t = window.setInterval(tick, 2000);
 
-    // quando torni visibile (cambi tab o riapri app), refresh immediato
     const onVis = () => {
       if (document.visibilityState === "visible") tick();
     };
@@ -386,33 +392,58 @@ export default function HomePage() {
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // ===== MOBILE: tab Chat/Cerca (non cambia grafica: è già così) =====
+  // ===== MOBILE: pagine dedicate (chats / search / chat) =====
+  // Nota: NON tocchiamo desktop.
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", gap: 10 }}>
-            <button
-              type="button"
-              style={{ ...btn, flex: 1, background: mobileTab === "chats" ? "rgba(122,41,255,0.18)" : "transparent" }}
-              onClick={() => setMobileTab("chats")}
-            >
-              Chat
-            </button>
-            <button
-              type="button"
-              style={{ ...btn, flex: 1, background: mobileTab === "search" ? "rgba(58,190,255,0.12)" : "transparent" }}
-              onClick={() => setMobileTab("search")}
-            >
-              Cerca
-            </button>
+          {/* Header mobile (solo funzione di navigazione pagine) */}
+          <div
+            style={{
+              padding: 10,
+              borderBottom: "1px solid #222",
+              background: "var(--tiko-bg-card)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 10,
+            }}
+          >
+            {mobileTab === "search" ? (
+              <>
+                <button type="button" style={headerBtn} onClick={() => setMobileTab("chats")} aria-label="Indietro">
+                  ←
+                </button>
+                <div style={{ fontWeight: 950, flex: 1, textAlign: "center" }}>Cerca</div>
+                <div style={{ width: 46 }} />
+              </>
+            ) : mobileTab === "chat" ? (
+              <>
+                {/* Il back vero lo gestisce ChatWindow, qui teniamo header neutro */}
+                <button type="button" style={headerBtn} onClick={() => setMobileTab("chats")} aria-label="Indietro">
+                  ←
+                </button>
+                <div style={{ fontWeight: 950, flex: 1, textAlign: "center" }}>Chat</div>
+                <div style={{ width: 46 }} />
+              </>
+            ) : (
+              <>
+                <div style={{ fontWeight: 950 }}>Chat</div>
+                <button type="button" style={headerBtn} onClick={() => setMobileTab("search")} aria-label="Apri ricerca">
+                  Cerca
+                </button>
+              </>
+            )}
           </div>
 
           <div style={{ flex: 1, minHeight: 0 }}>
             {mobileTab === "search" ? (
-              SearchBlock
+              // Pagina dedicata Ricerca
+              <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
             ) : mobileTab === "chat" ? (
+              // Pagina dedicata Chat
               <ChatWindow
                 conversationId={selectedConversation?.id}
                 conversation={selectedConversation}
@@ -421,6 +452,7 @@ export default function HomePage() {
                 onBack={() => setMobileTab("chats")}
               />
             ) : (
+              // Pagina lista conversazioni
               <ConversationList
                 conversations={conversations}
                 selectedConversationId={selectedConversation?.id ?? null}
@@ -436,7 +468,7 @@ export default function HomePage() {
     );
   }
 
-  // ===== DESKTOP: struttura invariata (colonna sinistra unica + chat a destra) =====
+  // ===== DESKTOP: struttura invariata (ricerca sopra + chat list sotto a sinistra, chat a destra) =====
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
