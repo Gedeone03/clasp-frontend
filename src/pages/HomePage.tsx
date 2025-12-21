@@ -3,13 +3,7 @@ import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
 import { useAuth } from "../AuthContext";
-import {
-  fetchConversations,
-  fetchMessages,
-  searchUsers,
-  sendFriendRequest,
-} from "../api";
-import { playNotificationBeep } from "../utils/notifySound";
+import { fetchConversations, fetchMessages, searchUsers, sendFriendRequest } from "../api";
 
 function useIsMobile(breakpointPx: number = 900) {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
@@ -19,23 +13,6 @@ function useIsMobile(breakpointPx: number = 900) {
     return () => window.removeEventListener("resize", onResize);
   }, [breakpointPx]);
   return isMobile;
-}
-
-function isSoundEnabled(): boolean {
-  const v = localStorage.getItem("clasp.soundEnabled");
-  return v !== "false"; // default ON
-}
-
-function convKey(conv: any): string {
-  const last =
-    conv?.lastMessage?.id ??
-    conv?.lastMessage?.createdAt ??
-    conv?.messages?.[0]?.id ??
-    conv?.messages?.[0]?.createdAt ??
-    conv?.updatedAt ??
-    conv?.createdAt ??
-    "";
-  return last ? String(last) : "";
 }
 
 type UserLite = {
@@ -83,38 +60,15 @@ export default function HomePage() {
   const { user } = useAuth();
   const isMobile = useIsMobile(900);
 
-  // ===== Chats =====
+  // === Chat (colonna Home + colonna Chat) ===
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // ===== Unread + toast =====
-  const [unreadCounts, setUnreadCounts] = useState<Record<number, number>>({});
-  const [toast, setToast] = useState<string | null>(null);
-  const toastTimerRef = useRef<number | null>(null);
-  const keysRef = useRef<Record<number, string>>({});
-  const firstPollRef = useRef(true);
-
-  const totalUnread = useMemo(
-    () => Object.values(unreadCounts).reduce((a, b) => a + (b || 0), 0),
-    [unreadCounts]
-  );
-
-  useEffect(() => {
-    const base = "Clasp";
-    document.title = totalUnread > 0 ? `(${totalUnread}) ${base}` : base;
-  }, [totalUnread]);
-
-  const showToast = (msg: string) => {
-    setToast(msg);
-    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToast(null), 2800);
-  };
-
-  // ===== Mobile tabs =====
+  // === Mobile tabs (NON cambiamo struttura generale, serve solo per vedere Cerca su mobile) ===
   const [mobileTab, setMobileTab] = useState<"chats" | "search" | "chat">("chats");
 
-  // ===== Search (IN HOME) =====
+  // === Ricerca utenti (COLONNA SEPARATA accanto a Home) ===
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -128,7 +82,7 @@ export default function HomePage() {
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
-  // ===== UI styles =====
+  // ===== UI styles (non tocchiamo altro, solo layout) =====
   const card: React.CSSProperties = {
     background: "var(--tiko-bg-card)",
     border: "1px solid #222",
@@ -163,18 +117,13 @@ export default function HomePage() {
     borderColor: "var(--tiko-mint)",
   };
 
-  // ===== Load conversations (initial) =====
+  // ===== Load conversations =====
   useEffect(() => {
     if (!user) return;
     (async () => {
       try {
         const list = await fetchConversations();
         setConversations(list);
-
-        const init: Record<number, string> = {};
-        for (const c of list as any) init[c.id] = convKey(c);
-        keysRef.current = init;
-
         if (!selectedConversation && list.length > 0) setSelectedConversation(list[0]);
       } catch {
         // silent
@@ -183,118 +132,23 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // ===== Load messages on selection =====
+  // ===== Load messages on select =====
   useEffect(() => {
     if (!selectedConversation) return;
     (async () => {
       try {
         const list = await fetchMessages(selectedConversation.id);
         setMessages(list as any);
-        setUnreadCounts((p) => ({ ...p, [selectedConversation.id]: 0 }));
       } catch {
         // silent
       }
     })();
   }, [selectedConversation?.id]);
 
-  // ===== Poll conversations (notify on closed chats) =====
-  useEffect(() => {
-    if (!user) return;
-
-    let alive = true;
-
-    const tick = async () => {
-      try {
-        const list = await fetchConversations();
-        if (!alive) return;
-
-        setConversations(list);
-
-        const prevKeys = keysRef.current;
-        const nextKeys: Record<number, string> = { ...prevKeys };
-
-        if (firstPollRef.current) {
-          for (const c of list as any) nextKeys[c.id] = convKey(c);
-          keysRef.current = nextKeys;
-          firstPollRef.current = false;
-          return;
-        }
-
-        for (const c of list as any) {
-          const id = Number(c.id);
-          const nk = convKey(c);
-          const pk = prevKeys[id];
-
-          const chatOpen = selectedConversation?.id === id;
-
-          if (pk && nk && nk !== pk && !chatOpen) {
-            setUnreadCounts((prev) => ({ ...prev, [id]: (prev[id] || 0) + 1 }));
-            showToast("Nuovo messaggio ricevuto");
-
-            if (isSoundEnabled()) {
-              try {
-                await playNotificationBeep();
-              } catch {}
-            }
-          }
-
-          nextKeys[id] = nk;
-        }
-
-        keysRef.current = nextKeys;
-      } catch {
-        // silent
-      }
-    };
-
-    tick();
-    const timer = window.setInterval(tick, 10000);
-
-    const onVis = () => {
-      if (document.visibilityState === "visible") tick();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
-    return () => {
-      alive = false;
-      window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [user?.id, selectedConversation?.id]);
-
-  // ===== “Live feel” in open chat: poll messages every 2s (ONLY when open) =====
-  useEffect(() => {
-    if (!user) return;
-    if (!selectedConversation?.id) return;
-
-    // su mobile, poll 2s solo quando sei davvero nella view chat
-    if (isMobile && mobileTab !== "chat") return;
-
-    let alive = true;
-    const convId = Number(selectedConversation.id);
-
-    const tick = async () => {
-      try {
-        const list = await fetchMessages(convId);
-        if (!alive) return;
-        setMessages(list as any);
-        setUnreadCounts((p) => ({ ...p, [convId]: 0 }));
-      } catch {
-        // silent
-      }
-    };
-
-    tick();
-    const t = window.setInterval(tick, 2000);
-    return () => {
-      alive = false;
-      window.clearInterval(t);
-    };
-  }, [user?.id, selectedConversation?.id, isMobile, mobileTab]);
-
   // ===== Search handlers =====
   async function doSearch() {
     if (!user) return;
+
     setSearchErr(null);
     setSearchInfo(null);
     setResults([]);
@@ -302,29 +156,26 @@ export default function HomePage() {
 
     try {
       const hasAny =
-        q.trim() ||
-        city.trim() ||
-        area.trim() ||
-        mood ||
-        state ||
-        visibleOnly;
+        q.trim() || city.trim() || area.trim() || mood || state || visibleOnly;
 
-      // consente ricerca “visibile a tutti” anche senza nome
       if (!hasAny) {
         setSearchInfo("Inserisci almeno un filtro (anche solo “Visibile a tutti”).");
         return;
       }
 
-      const list = await searchUsers({
+      // NB: NON cambiamo api.ts. Usiamo qualsiasi signature esista tramite cast any.
+      const params = {
         q: q.trim() || undefined,
         city: city.trim() || undefined,
         area: area.trim() || undefined,
         mood: mood || undefined,
         state: state || undefined,
         visibleOnly: visibleOnly || undefined,
-      });
+      };
 
+      const list = await (searchUsers as any)(params);
       const filtered = (list || []).filter((u: any) => u?.id !== user.id);
+
       setResults(filtered);
       if (filtered.length === 0) setSearchInfo("Nessun utente trovato.");
     } catch (e: any) {
@@ -337,7 +188,6 @@ export default function HomePage() {
   async function doSendFriendRequest(userId: number) {
     setSearchErr(null);
     setSearchInfo(null);
-
     try {
       await sendFriendRequest(userId);
       setSentRequestIds((prev) => new Set(prev).add(userId));
@@ -359,7 +209,7 @@ export default function HomePage() {
     setSearchInfo(null);
   }
 
-  const SearchPanel = (
+  const SearchColumn = (
     <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
       <div style={card}>
         <div style={{ fontWeight: 950, marginBottom: 10 }}>Ricerca utenti</div>
@@ -368,11 +218,13 @@ export default function HomePage() {
           <input style={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome o username" />
           <input style={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città" />
           <input style={input} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Zona / Area" />
+
           <select style={input as any} value={state} onChange={(e) => setState(e.target.value)}>
             {STATE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
+
           <select style={input as any} value={mood} onChange={(e) => setMood(e.target.value)}>
             {MOOD_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -393,10 +245,21 @@ export default function HomePage() {
         </div>
 
         {searchErr && (
-          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 900 }}>
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #3a1f1f",
+              background: "rgba(255,59,48,0.08)",
+              color: "#ff6b6b",
+              fontWeight: 900,
+            }}
+          >
             {searchErr}
           </div>
         )}
+
         {searchInfo && (
           <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 12, border: "1px solid #2a2a2a", color: "var(--tiko-text)", fontWeight: 900 }}>
             {searchInfo}
@@ -455,7 +318,7 @@ export default function HomePage() {
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // ===== MOBILE: tabs Chat / Cerca, la ricerca è in Home anche su mobile =====
+  // ===== MOBILE: per non stravolgere, usiamo tab “Chat / Cerca” =====
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
@@ -481,7 +344,7 @@ export default function HomePage() {
 
           <div style={{ flex: 1, minHeight: 0 }}>
             {mobileTab === "search" ? (
-              SearchPanel
+              SearchColumn
             ) : mobileTab === "chat" ? (
               <ChatWindow
                 conversationId={selectedConversation?.id}
@@ -494,7 +357,6 @@ export default function HomePage() {
               <ConversationList
                 conversations={conversations}
                 selectedConversationId={selectedConversation?.id ?? null}
-                unreadCounts={unreadCounts}
                 onSelect={(c) => {
                   setSelectedConversation(c);
                   setMobileTab("chat");
@@ -503,53 +365,46 @@ export default function HomePage() {
             )}
           </div>
         </div>
-
-        {toast && (
-          <div
-            style={{
-              position: "fixed",
-              top: 14,
-              left: "50%",
-              transform: "translateX(-50%)",
-              zIndex: 20000,
-              padding: "10px 14px",
-              borderRadius: 14,
-              background: "rgba(0,0,0,0.88)",
-              border: "1px solid #333",
-              color: "#fff",
-              fontSize: 13,
-              fontWeight: 950,
-            }}
-          >
-            {toast}
-          </div>
-        )}
       </div>
     );
   }
 
-  // ===== DESKTOP: 3 colonne (Chat list + Ricerca in Home + Chat window) =====
+  // ===== DESKTOP: SOLO 2 COLONNE + CHAT (Home | Ricerca | Chat) =====
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
-        {/* Colonna chat */}
-        <div style={{ width: "clamp(300px, 28vw, 380px)", borderRight: "1px solid #222", minWidth: 0, background: "var(--tiko-bg-gray)" }}>
+        {/* 1) COLONNA HOME (conversazioni) */}
+        <div
+          style={{
+            width: "clamp(300px, 28vw, 380px)",
+            borderRight: "1px solid #222",
+            minWidth: 0,
+            background: "var(--tiko-bg-gray)",
+          }}
+        >
           <ConversationList
             conversations={conversations}
             selectedConversationId={selectedConversation?.id ?? null}
-            unreadCounts={unreadCounts}
             onSelect={(c) => setSelectedConversation(c)}
           />
         </div>
 
-        {/* Colonna ricerca (IN HOME) */}
-        <div style={{ width: "clamp(340px, 32vw, 460px)", borderRight: "1px solid #222", minWidth: 0, background: "var(--tiko-bg-dark)", overflowY: "auto" }}>
-          {SearchPanel}
+        {/* 2) COLONNA RICERCA (SEPARATA, accanto alla Home) */}
+        <div
+          style={{
+            width: "clamp(340px, 32vw, 460px)",
+            borderRight: "1px solid #222",
+            minWidth: 0,
+            background: "var(--tiko-bg-dark)",
+            overflowY: "auto",
+          }}
+        >
+          {SearchColumn}
         </div>
 
-        {/* Colonna chat */}
+        {/* 3) COLONNA CHAT */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <ChatWindow
             conversationId={selectedConversation?.id}
@@ -559,27 +414,6 @@ export default function HomePage() {
           />
         </div>
       </div>
-
-      {toast && (
-        <div
-          style={{
-            position: "fixed",
-            top: 14,
-            left: "50%",
-            transform: "translateX(-50%)",
-            zIndex: 20000,
-            padding: "10px 14px",
-            borderRadius: 14,
-            background: "rgba(0,0,0,0.88)",
-            border: "1px solid #333",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 950,
-          }}
-        >
-          {toast}
-        </div>
-      )}
     </div>
   );
 }
