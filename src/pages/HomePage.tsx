@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
@@ -60,15 +60,15 @@ export default function HomePage() {
   const { user } = useAuth();
   const isMobile = useIsMobile(900);
 
-  // === Chat (colonna Home + colonna Chat) ===
+  // ===== Chat =====
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // === Mobile tabs (NON cambiamo struttura generale, serve solo per vedere Cerca su mobile) ===
+  // ===== Mobile tabs (solo per mobile; desktop è 2 colonne + chat) =====
   const [mobileTab, setMobileTab] = useState<"chats" | "search" | "chat">("chats");
 
-  // === Ricerca utenti (COLONNA SEPARATA accanto a Home) ===
+  // ===== Ricerca utenti (stessa colonna delle chat, SOPRA la lista) =====
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -82,7 +82,7 @@ export default function HomePage() {
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
-  // ===== UI styles (non tocchiamo altro, solo layout) =====
+  // ===== UI styles =====
   const card: React.CSSProperties = {
     background: "var(--tiko-bg-card)",
     border: "1px solid #222",
@@ -132,7 +132,7 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // ===== Load messages on select =====
+  // ===== Load messages when selecting a conversation =====
   useEffect(() => {
     if (!selectedConversation) return;
     (async () => {
@@ -145,7 +145,7 @@ export default function HomePage() {
     })();
   }, [selectedConversation?.id]);
 
-  // ===== Search handlers =====
+  // ===== Search =====
   async function doSearch() {
     if (!user) return;
 
@@ -155,15 +155,14 @@ export default function HomePage() {
     setSearching(true);
 
     try {
-      const hasAny =
-        q.trim() || city.trim() || area.trim() || mood || state || visibleOnly;
+      const hasAny = q.trim() || city.trim() || area.trim() || mood || state || visibleOnly;
 
       if (!hasAny) {
         setSearchInfo("Inserisci almeno un filtro (anche solo “Visibile a tutti”).");
         return;
       }
 
-      // NB: NON cambiamo api.ts. Usiamo qualsiasi signature esista tramite cast any.
+      // Usiamo qualsiasi signature esista nel tuo api.ts
       const params = {
         q: q.trim() || undefined,
         city: city.trim() || undefined,
@@ -175,7 +174,6 @@ export default function HomePage() {
 
       const list = await (searchUsers as any)(params);
       const filtered = (list || []).filter((u: any) => u?.id !== user.id);
-
       setResults(filtered);
       if (filtered.length === 0) setSearchInfo("Nessun utente trovato.");
     } catch (e: any) {
@@ -209,8 +207,8 @@ export default function HomePage() {
     setSearchInfo(null);
   }
 
-  const SearchColumn = (
-    <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 12 }}>
+  const SearchBlock = (
+    <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
       <div style={card}>
         <div style={{ fontWeight: 950, marginBottom: 10 }}>Ricerca utenti</div>
 
@@ -218,13 +216,11 @@ export default function HomePage() {
           <input style={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome o username" />
           <input style={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città" />
           <input style={input} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Zona / Area" />
-
           <select style={input as any} value={state} onChange={(e) => setState(e.target.value)}>
             {STATE_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
             ))}
           </select>
-
           <select style={input as any} value={mood} onChange={(e) => setMood(e.target.value)}>
             {MOOD_OPTIONS.map((o) => (
               <option key={o.value} value={o.value}>{o.label}</option>
@@ -245,17 +241,7 @@ export default function HomePage() {
         </div>
 
         {searchErr && (
-          <div
-            style={{
-              marginTop: 10,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #3a1f1f",
-              background: "rgba(255,59,48,0.08)",
-              color: "#ff6b6b",
-              fontWeight: 900,
-            }}
-          >
+          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 900 }}>
             {searchErr}
           </div>
         )}
@@ -318,12 +304,11 @@ export default function HomePage() {
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // ===== MOBILE: per non stravolgere, usiamo tab “Chat / Cerca” =====
+  // ===== MOBILE: tab Chat/Cerca (non tocchiamo altro) =====
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
-
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", gap: 10 }}>
             <button
@@ -344,7 +329,7 @@ export default function HomePage() {
 
           <div style={{ flex: 1, minHeight: 0 }}>
             {mobileTab === "search" ? (
-              SearchColumn
+              SearchBlock
             ) : mobileTab === "chat" ? (
               <ChatWindow
                 conversationId={selectedConversation?.id}
@@ -369,42 +354,40 @@ export default function HomePage() {
     );
   }
 
-  // ===== DESKTOP: SOLO 2 COLONNE + CHAT (Home | Ricerca | Chat) =====
+  // ===== DESKTOP: (Ricerca+ChatList) in UNICA colonna, sopra/sotto =====
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
-        {/* 1) COLONNA HOME (conversazioni) */}
+        {/* COLONNA SINISTRA UNICA: Ricerca sopra + Chat list sotto */}
         <div
           style={{
-            width: "clamp(300px, 28vw, 380px)",
+            width: "clamp(360px, 34vw, 520px)",
             borderRight: "1px solid #222",
             minWidth: 0,
             background: "var(--tiko-bg-gray)",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
           }}
         >
-          <ConversationList
-            conversations={conversations}
-            selectedConversationId={selectedConversation?.id ?? null}
-            onSelect={(c) => setSelectedConversation(c)}
-          />
+          {/* Ricerca sopra */}
+          <div style={{ borderBottom: "1px solid #222", background: "var(--tiko-bg-dark)", overflowY: "auto" }}>
+            {SearchBlock}
+          </div>
+
+          {/* Chat list sotto (scroll indipendente) */}
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ConversationList
+              conversations={conversations}
+              selectedConversationId={selectedConversation?.id ?? null}
+              onSelect={(c) => setSelectedConversation(c)}
+            />
+          </div>
         </div>
 
-        {/* 2) COLONNA RICERCA (SEPARATA, accanto alla Home) */}
-        <div
-          style={{
-            width: "clamp(340px, 32vw, 460px)",
-            borderRight: "1px solid #222",
-            minWidth: 0,
-            background: "var(--tiko-bg-dark)",
-            overflowY: "auto",
-          }}
-        >
-          {SearchColumn}
-        </div>
-
-        {/* 3) COLONNA CHAT */}
+        {/* COLONNA DESTRA: Chat */}
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
           <ChatWindow
             conversationId={selectedConversation?.id}
