@@ -65,10 +65,10 @@ export default function HomePage() {
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // ===== Mobile tabs (solo per mobile; desktop è 2 colonne + chat) =====
+  // ===== Mobile tabs =====
   const [mobileTab, setMobileTab] = useState<"chats" | "search" | "chat">("chats");
 
-  // ===== Ricerca utenti (stessa colonna delle chat, SOPRA la lista) =====
+  // ===== Ricerca utenti (sopra lista chat) =====
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -82,7 +82,7 @@ export default function HomePage() {
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
-  // ===== UI styles =====
+  // ===== UI styles (NON cambiamo grafica/struttura) =====
   const card: React.CSSProperties = {
     background: "var(--tiko-bg-card)",
     border: "1px solid #222",
@@ -145,6 +145,53 @@ export default function HomePage() {
     })();
   }, [selectedConversation?.id]);
 
+  // ✅ LIVE MESSAGES (ripristino): ricarica la chat aperta ogni 2 secondi
+  // - Non cambia UI
+  // - Evita richieste concorrenti
+  // - Forza un refresh quando torni sulla tab/app
+  useEffect(() => {
+    if (!user) return;
+    const convId = Number(selectedConversation?.id || 0);
+    if (!convId) return;
+
+    // su mobile, facciamolo solo quando sei davvero dentro la chat
+    if (isMobile && mobileTab !== "chat") return;
+
+    let alive = true;
+    let inFlight = false;
+
+    const tick = async () => {
+      if (!alive) return;
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const list = await fetchMessages(convId);
+        if (!alive) return;
+        setMessages(list as any);
+      } catch {
+        // silent
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    // primo refresh subito, poi ogni 2 secondi
+    tick();
+    const t = window.setInterval(tick, 2000);
+
+    // quando torni visibile (cambi tab o riapri app), refresh immediato
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
+
+    return () => {
+      alive = false;
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVis);
+    };
+  }, [user?.id, selectedConversation?.id, isMobile, mobileTab]);
+
   // ===== Search =====
   async function doSearch() {
     if (!user) return;
@@ -162,7 +209,6 @@ export default function HomePage() {
         return;
       }
 
-      // Usiamo qualsiasi signature esista nel tuo api.ts
       const params = {
         q: q.trim() || undefined,
         city: city.trim() || undefined,
@@ -216,19 +262,34 @@ export default function HomePage() {
           <input style={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome o username" />
           <input style={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città" />
           <input style={input} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Zona / Area" />
+
           <select style={input as any} value={state} onChange={(e) => setState(e.target.value)}>
             {STATE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
             ))}
           </select>
+
           <select style={input as any} value={mood} onChange={(e) => setMood(e.target.value)}>
             {MOOD_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
             ))}
           </select>
         </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, color: "var(--tiko-text-dim)", fontSize: 13 }}>
+        <label
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            marginTop: 10,
+            color: "var(--tiko-text-dim)",
+            fontSize: 13,
+          }}
+        >
           <input type="checkbox" checked={visibleOnly} onChange={(e) => setVisibleOnly(e.target.checked)} />
           Solo “Visibile a tutti”
         </label>
@@ -237,17 +298,38 @@ export default function HomePage() {
           <button type="button" style={btnPrimary} onClick={doSearch} disabled={searching}>
             {searching ? "Ricerca..." : "Cerca"}
           </button>
-          <button type="button" style={btn} onClick={resetSearch}>Reset</button>
+          <button type="button" style={btn} onClick={resetSearch}>
+            Reset
+          </button>
         </div>
 
         {searchErr && (
-          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 900 }}>
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #3a1f1f",
+              background: "rgba(255,59,48,0.08)",
+              color: "#ff6b6b",
+              fontWeight: 900,
+            }}
+          >
             {searchErr}
           </div>
         )}
 
         {searchInfo && (
-          <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 12, border: "1px solid #2a2a2a", color: "var(--tiko-text)", fontWeight: 900 }}>
+          <div
+            style={{
+              marginTop: 10,
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #2a2a2a",
+              color: "var(--tiko-text)",
+              fontWeight: 900,
+            }}
+          >
             {searchInfo}
           </div>
         )}
@@ -304,7 +386,7 @@ export default function HomePage() {
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // ===== MOBILE: tab Chat/Cerca (non tocchiamo altro) =====
+  // ===== MOBILE: tab Chat/Cerca (non cambia grafica: è già così) =====
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
@@ -354,7 +436,7 @@ export default function HomePage() {
     );
   }
 
-  // ===== DESKTOP: (Ricerca+ChatList) in UNICA colonna, sopra/sotto =====
+  // ===== DESKTOP: struttura invariata (colonna sinistra unica + chat a destra) =====
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
@@ -377,7 +459,7 @@ export default function HomePage() {
             {SearchBlock}
           </div>
 
-          {/* Chat list sotto (scroll indipendente) */}
+          {/* Chat list sotto */}
           <div style={{ flex: 1, minHeight: 0 }}>
             <ConversationList
               conversations={conversations}
