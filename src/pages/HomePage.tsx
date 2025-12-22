@@ -501,7 +501,7 @@ export default function HomePage() {
   // DESKTOP: INVARIATO
   // =========================
   return (
-    <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
+    <div style={{ width: 0, flex: "0 0 0", overflow: "visible" }}>
       <Sidebar />
 
       <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
