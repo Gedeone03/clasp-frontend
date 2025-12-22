@@ -415,7 +415,134 @@ export default function HomePage() {
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
+          // =========================
+  // MOBILE: pagine dedicate
+  // =========================
+  if (isMobile) {
+    return (
+      <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
+        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
+          {/* Header SOLO per le pagine dedicate Search/Chats */}
+          {mobileView === "search" ? (
+            <div
+              style={{
+                padding: 10,
+                borderBottom: "1px solid #222",
+                background: "var(--tiko-bg-card)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
+                ←
+              </button>
+              <div style={{ fontWeight: 950 }}>Cerca utenti</div>
+            </div>
+          ) : mobileView === "chats" ? (
+            <div
+              style={{
+                padding: 10,
+                borderBottom: "1px solid #222",
+                background: "var(--tiko-bg-card)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
+                ←
+              </button>
+              <div style={{ fontWeight: 950 }}>Chat</div>
+            </div>
+          ) : null}
+
+          <div style={{ flex: 1, minHeight: 0 }}>
+            {/* HUB: comandi Chat / Ricerca -> pagine dedicate */}
+            {mobileView === "hub" ? (
+              <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ ...card }}>
+                  <div style={{ fontWeight: 950, marginBottom: 10 }}>Cosa vuoi fare?</div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button type="button" style={btnPrimary} onClick={() => setMobileView("chats")}>
+                      Chat
+                    </button>
+                    <button type="button" style={btn} onClick={() => setMobileView("search")}>
+                      Cerca utenti
+                    </button>
+                  </div>
+                </div>
+
+                {/* Non cambiamo altro: niente spostamenti, niente UI extra */}
+              </div>
+            ) : mobileView === "search" ? (
+              <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
+            ) : mobileView === "chats" ? (
+              <ConversationList
+                conversations={conversations}
+                selectedConversationId={selectedConversation?.id ?? null}
+                onSelect={(c) => {
+                  setSelectedConversation(c);
+                  setMobileView("chat");
+                }}
+              />
+            ) : (
+              // mobileView === "chat"
+              <ChatWindow
+                conversationId={selectedConversation?.id}
+                conversation={selectedConversation}
+                currentUser={user}
+                messages={messages}
+                onBack={() => setMobileView("chats")}
+              />
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // =========================
+  // DESKTOP: INVARIATO
+  // =========================
+  return (
+    <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
+      {mobileView === "hub" ? <Sidebar /> : null}
+
+      <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
+        <div
+          style={{
+            width: "clamp(360px, 34vw, 520px)",
+            borderRight: "1px solid #222",
+            minWidth: 0,
+            background: "var(--tiko-bg-gray)",
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+          }}
+        >
+          <div style={{ borderBottom: "1px solid #222", background: "var(--tiko-bg-dark)", overflowY: "auto" }}>
+            {SearchBlock}
+          </div>
+
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <ConversationList
+              conversations={conversations}
+              selectedConversationId={selectedConversation?.id ?? null}
+              onSelect={(c) => setSelectedConversation(c)}
+            />
+          </div>
+        </div>
+
+        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
+          <ChatWindow conversationId={selectedConversation?.id} conversation={selectedConversation} currentUser={user} messages={messages} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           {/* Header SOLO per le pagine dedicate Search/Chats */}
           {mobileView === "search" ? (
