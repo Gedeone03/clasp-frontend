@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
@@ -6,12 +6,22 @@ import { useAuth } from "../AuthContext";
 import { fetchConversations, fetchMessages, searchUsers, sendFriendRequest } from "../api";
 
 function useIsMobile(breakpointPx: number = 900) {
-  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpointPx);
+  // rilevazione più robusta (non cambia grafica/struttura, solo detection)
+  const detect = () => {
+    const mq = window.matchMedia ? window.matchMedia(`(max-width: ${breakpointPx}px)`).matches : window.innerWidth < breakpointPx;
+    const uaMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    const touch = "ontouchstart" in window || (navigator as any).maxTouchPoints > 0;
+    return mq || (uaMobile && touch);
+  };
+
+  const [isMobile, setIsMobile] = useState<boolean>(detect());
+
   useEffect(() => {
-    const onResize = () => setIsMobile(window.innerWidth < breakpointPx);
+    const onResize = () => setIsMobile(detect());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [breakpointPx]);
+
   return isMobile;
 }
 
@@ -42,7 +52,7 @@ const MOOD_OPTIONS = [
   { value: "TRISTE", label: "Triste" },
   { value: "RILASSATO", label: "Rilassato" },
   { value: "ANSIOSO", label: "Ansioso" },
-  { value: "ENTUSIASTA", label: "EntusIasta" },
+  { value: "ENTUSIASTA", label: "Entusiasta" },
   { value: "ARRABBIATO", label: "Arrabbiato" },
   { value: "SOLO", label: "Solo" },
 ];
@@ -64,10 +74,10 @@ export default function HomePage() {
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // SOLO MOBILE: pagine dedicate
-  const [mobileTab, setMobileTab] = useState<"chats" | "search" | "chat">("chats");
+  // SOLO MOBILE: tre “pagine dedicate” (hub -> chat list -> chat / search)
+  const [mobileView, setMobileView] = useState<"hub" | "search" | "chats" | "chat">("hub");
 
-  // Ricerca utenti (rimane in Home come prima: desktop sopra chat list, mobile in pagina dedicata)
+  // Ricerca utenti (RESTO IDENTICO: resta nella Home desktop come prima)
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -151,14 +161,13 @@ export default function HomePage() {
     })();
   }, [selectedConversation?.id]);
 
-  // Live polling (come avevamo fatto): ogni 2s SOLO per chat aperta
+  // Live polling: ogni 2s SOLO quando sei nella pagina chat (mobile) o sempre (desktop)
   useEffect(() => {
     if (!user) return;
     const convId = Number(selectedConversation?.id || 0);
     if (!convId) return;
 
-    // su mobile, poll solo quando sei nella pagina chat
-    if (isMobile && mobileTab !== "chat") return;
+    if (isMobile && mobileView !== "chat") return;
 
     let alive = true;
     let inFlight = false;
@@ -191,7 +200,7 @@ export default function HomePage() {
       window.clearInterval(t);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [user?.id, selectedConversation?.id, isMobile, mobileTab]);
+  }, [user?.id, selectedConversation?.id, isMobile, mobileView]);
 
   async function doSearch() {
     if (!user) return;
@@ -253,201 +262,233 @@ export default function HomePage() {
     setSearchInfo(null);
   }
 
-  const SearchBlock = (
-    <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={card}>
-        <div style={{ fontWeight: 950, marginBottom: 10 }}>Ricerca utenti</div>
+  const SearchBlock = useMemo(() => {
+    return (
+      <div style={{ padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+        <div style={card}>
+          <div style={{ fontWeight: 950, marginBottom: 10 }}>Ricerca utenti</div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-          <input style={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome o username" />
-          <input style={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città" />
-          <input style={input} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Zona / Area" />
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <input style={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome o username" />
+            <input style={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città" />
+            <input style={input} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Zona / Area" />
 
-          <select style={input as any} value={state} onChange={(e) => setState(e.target.value)}>
-            {STATE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
+            <select style={input as any} value={state} onChange={(e) => setState(e.target.value)}>
+              {STATE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
 
-          <select style={input as any} value={mood} onChange={(e) => setMood(e.target.value)}>
-            {MOOD_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 10,
-            marginTop: 10,
-            color: "var(--tiko-text-dim)",
-            fontSize: 13,
-          }}
-        >
-          <input type="checkbox" checked={visibleOnly} onChange={(e) => setVisibleOnly(e.target.checked)} />
-          Solo “Visibile a tutti”
-        </label>
-
-        <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
-          <button type="button" style={btnPrimary} onClick={doSearch} disabled={searching}>
-            {searching ? "Ricerca..." : "Cerca"}
-          </button>
-          <button type="button" style={btn} onClick={resetSearch}>
-            Reset
-          </button>
-        </div>
-
-        {searchErr && (
-          <div
-            style={{
-              marginTop: 10,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #3a1f1f",
-              background: "rgba(255,59,48,0.08)",
-              color: "#ff6b6b",
-              fontWeight: 900,
-            }}
-          >
-            {searchErr}
+            <select style={input as any} value={mood} onChange={(e) => setMood(e.target.value)}>
+              {MOOD_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
           </div>
-        )}
 
-        {searchInfo && (
-          <div
+          <label
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
               marginTop: 10,
-              padding: "10px 12px",
-              borderRadius: 12,
-              border: "1px solid #2a2a2a",
-              color: "var(--tiko-text)",
-              fontWeight: 900,
+              color: "var(--tiko-text-dim)",
+              fontSize: 13,
             }}
           >
-            {searchInfo}
+            <input type="checkbox" checked={visibleOnly} onChange={(e) => setVisibleOnly(e.target.checked)} />
+            Solo “Visibile a tutti”
+          </label>
+
+          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+            <button type="button" style={btnPrimary} onClick={doSearch} disabled={searching}>
+              {searching ? "Ricerca..." : "Cerca"}
+            </button>
+            <button type="button" style={btn} onClick={resetSearch}>
+              Reset
+            </button>
+          </div>
+
+          {searchErr && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid #3a1f1f",
+                background: "rgba(255,59,48,0.08)",
+                color: "#ff6b6b",
+                fontWeight: 900,
+              }}
+            >
+              {searchErr}
+            </div>
+          )}
+
+          {searchInfo && (
+            <div
+              style={{
+                marginTop: 10,
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px solid #2a2a2a",
+                color: "var(--tiko-text)",
+                fontWeight: 900,
+              }}
+            >
+              {searchInfo}
+            </div>
+          )}
+        </div>
+
+        {results.length > 0 && (
+          <div style={card}>
+            <div style={{ fontWeight: 950, marginBottom: 10 }}>Risultati</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {results.map((u: any) => {
+                const requested = sentRequestIds.has(Number(u.id));
+                return (
+                  <div
+                    key={u.id}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: 10,
+                      padding: 10,
+                      borderRadius: 12,
+                      border: "1px solid #232323",
+                    }}
+                  >
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontWeight: 950, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {u.displayName || u.username || "Utente"}{" "}
+                        {u.username ? <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span> : null}
+                      </div>
+                      <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                        {[u.city, u.area].filter(Boolean).join(" • ")}
+                        {u.mood ? ` • Mood: ${moodLabel(u.mood)}` : ""}
+                        {u.state ? ` • Stato: ${stateLabel(u.state)}` : ""}
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      style={requested ? btn : btnPrimary}
+                      disabled={requested}
+                      onClick={() => doSendFriendRequest(Number(u.id))}
+                      title={requested ? "Richiesta già inviata" : "Invia richiesta amicizia"}
+                    >
+                      {requested ? "Inviata" : "Aggiungi"}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
-
-      {results.length > 0 && (
-        <div style={card}>
-          <div style={{ fontWeight: 950, marginBottom: 10 }}>Risultati</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {results.map((u: any) => {
-              const requested = sentRequestIds.has(Number(u.id));
-              return (
-                <div
-                  key={u.id}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 10,
-                    padding: 10,
-                    borderRadius: 12,
-                    border: "1px solid #232323",
-                  }}
-                >
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 950, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-                      {u.displayName || u.username || "Utente"}{" "}
-                      {u.username ? <span style={{ color: "var(--tiko-text-dim)" }}>@{u.username}</span> : null}
-                    </div>
-                    <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
-                      {[u.city, u.area].filter(Boolean).join(" • ")}
-                      {u.mood ? ` • Mood: ${moodLabel(u.mood)}` : ""}
-                      {u.state ? ` • Stato: ${stateLabel(u.state)}` : ""}
-                    </div>
-                  </div>
-
-                  <button
-                    type="button"
-                    style={requested ? btn : btnPrimary}
-                    disabled={requested}
-                    onClick={() => doSendFriendRequest(Number(u.id))}
-                    title={requested ? "Richiesta già inviata" : "Invia richiesta amicizia"}
-                  >
-                    {requested ? "Inviata" : "Aggiungi"}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-    </div>
-  );
+    );
+  }, [
+    q,
+    city,
+    area,
+    mood,
+    state,
+    visibleOnly,
+    results,
+    searching,
+    searchErr,
+    searchInfo,
+    sentRequestIds,
+  ]);
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // ===== MOBILE: pagina dedicata Chat e Cerca con freccia indietro =====
+  // =========================
+  // MOBILE: pagine dedicate
+  // =========================
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
         <Sidebar />
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          <div
-            style={{
-              padding: 10,
-              borderBottom: "1px solid #222",
-              background: "var(--tiko-bg-card)",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: 10,
-            }}
-          >
-            {mobileTab === "search" ? (
-              <>
-                <button type="button" style={headerBtn} onClick={() => setMobileTab("chats")} aria-label="Indietro">
-                  ←
-                </button>
-                <div style={{ fontWeight: 950, flex: 1, textAlign: "center" }}>Cerca</div>
-                <div style={{ width: 46 }} />
-              </>
-            ) : mobileTab === "chat" ? (
-              <>
-                <button type="button" style={headerBtn} onClick={() => setMobileTab("chats")} aria-label="Indietro">
-                  ←
-                </button>
-                <div style={{ fontWeight: 950, flex: 1, textAlign: "center" }}>Chat</div>
-                <div style={{ width: 46 }} />
-              </>
-            ) : (
-              <>
-                <div style={{ fontWeight: 950 }}>Chat</div>
-                <button type="button" style={headerBtn} onClick={() => setMobileTab("search")} aria-label="Apri ricerca">
-                  Cerca
-                </button>
-              </>
-            )}
-          </div>
+          {/* Header SOLO per le pagine dedicate Search/Chats */}
+          {mobileView === "search" ? (
+            <div
+              style={{
+                padding: 10,
+                borderBottom: "1px solid #222",
+                background: "var(--tiko-bg-card)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
+                ←
+              </button>
+              <div style={{ fontWeight: 950 }}>Cerca utenti</div>
+            </div>
+          ) : mobileView === "chats" ? (
+            <div
+              style={{
+                padding: 10,
+                borderBottom: "1px solid #222",
+                background: "var(--tiko-bg-card)",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
+                ←
+              </button>
+              <div style={{ fontWeight: 950 }}>Chat</div>
+            </div>
+          ) : null}
 
           <div style={{ flex: 1, minHeight: 0 }}>
-            {mobileTab === "search" ? (
+            {/* HUB: comandi Chat / Ricerca -> pagine dedicate */}
+            {mobileView === "hub" ? (
+              <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
+                <div style={{ ...card }}>
+                  <div style={{ fontWeight: 950, marginBottom: 10 }}>Cosa vuoi fare?</div>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    <button type="button" style={btnPrimary} onClick={() => setMobileView("chats")}>
+                      Chat
+                    </button>
+                    <button type="button" style={btn} onClick={() => setMobileView("search")}>
+                      Cerca utenti
+                    </button>
+                  </div>
+                </div>
+
+                {/* Non cambiamo altro: niente spostamenti, niente UI extra */}
+              </div>
+            ) : mobileView === "search" ? (
               <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
-            ) : mobileTab === "chat" ? (
-              <ChatWindow
-                conversationId={selectedConversation?.id}
-                conversation={selectedConversation}
-                currentUser={user}
-                messages={messages}
-                onBack={() => setMobileTab("chats")}
-              />
-            ) : (
+            ) : mobileView === "chats" ? (
               <ConversationList
                 conversations={conversations}
                 selectedConversationId={selectedConversation?.id ?? null}
                 onSelect={(c) => {
                   setSelectedConversation(c);
-                  setMobileTab("chat");
+                  setMobileView("chat");
                 }}
+              />
+            ) : (
+              // mobileView === "chat"
+              <ChatWindow
+                conversationId={selectedConversation?.id}
+                conversation={selectedConversation}
+                currentUser={user}
+                messages={messages}
+                onBack={() => setMobileView("chats")}
               />
             )}
           </div>
@@ -456,7 +497,9 @@ export default function HomePage() {
     );
   }
 
-  // ===== DESKTOP: struttura invariata =====
+  // =========================
+  // DESKTOP: INVARIATO
+  // =========================
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
       <Sidebar />
@@ -487,12 +530,7 @@ export default function HomePage() {
         </div>
 
         <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <ChatWindow
-            conversationId={selectedConversation?.id}
-            conversation={selectedConversation}
-            currentUser={user}
-            messages={messages}
-          />
+          <ChatWindow conversationId={selectedConversation?.id} conversation={selectedConversation} currentUser={user} messages={messages} />
         </div>
       </div>
     </div>
