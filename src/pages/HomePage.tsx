@@ -6,7 +6,6 @@ import { useAuth } from "../AuthContext";
 import { fetchConversations, fetchMessages, searchUsers, sendFriendRequest } from "../api";
 
 function useIsMobile(breakpointPx: number = 900) {
-  // rilevazione più robusta (non cambia grafica/struttura, solo detection)
   const detect = () => {
     const mq = window.matchMedia ? window.matchMedia(`(max-width: ${breakpointPx}px)`).matches : window.innerWidth < breakpointPx;
     const uaMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
@@ -74,10 +73,10 @@ export default function HomePage() {
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // SOLO MOBILE: tre “pagine dedicate” (hub -> chat list -> chat / search)
+  // SOLO MOBILE: pagine dedicate (hub -> search / chats / chat)
   const [mobileView, setMobileView] = useState<"hub" | "search" | "chats" | "chat">("hub");
 
-  // Ricerca utenti (RESTO IDENTICO: resta nella Home desktop come prima)
+  // Ricerca utenti
   const [q, setQ] = useState("");
   const [city, setCity] = useState("");
   const [area, setArea] = useState("");
@@ -91,7 +90,6 @@ export default function HomePage() {
   const [searchInfo, setSearchInfo] = useState<string | null>(null);
   const [sentRequestIds, setSentRequestIds] = useState<Set<number>>(new Set());
 
-  // Stili (invariati)
   const card: React.CSSProperties = {
     background: "var(--tiko-bg-card)",
     border: "1px solid #222",
@@ -133,7 +131,6 @@ export default function HomePage() {
     fontWeight: 950,
   };
 
-  // Carica conversazioni
   useEffect(() => {
     if (!user) return;
     (async () => {
@@ -148,7 +145,6 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
-  // Carica messaggi quando selezioni una conversazione
   useEffect(() => {
     if (!selectedConversation) return;
     (async () => {
@@ -415,133 +411,8 @@ export default function HomePage() {
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
-          // =========================
-  // MOBILE: pagine dedicate
-  // =========================
-  if (isMobile) {
-    return (
-      <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
-        <Sidebar />
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          {/* Header SOLO per le pagine dedicate Search/Chats */}
-          {mobileView === "search" ? (
-            <div
-              style={{
-                padding: 10,
-                borderBottom: "1px solid #222",
-                background: "var(--tiko-bg-card)",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
-                ←
-              </button>
-              <div style={{ fontWeight: 950 }}>Cerca utenti</div>
-            </div>
-          ) : mobileView === "chats" ? (
-            <div
-              style={{
-                padding: 10,
-                borderBottom: "1px solid #222",
-                background: "var(--tiko-bg-card)",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
-              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
-                ←
-              </button>
-              <div style={{ fontWeight: 950 }}>Chat</div>
-            </div>
-          ) : null}
-
-          <div style={{ flex: 1, minHeight: 0 }}>
-            {/* HUB: comandi Chat / Ricerca -> pagine dedicate */}
-            {mobileView === "hub" ? (
-              <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ ...card }}>
-                  <div style={{ fontWeight: 950, marginBottom: 10 }}>Cosa vuoi fare?</div>
-                  <div style={{ display: "flex", gap: 10 }}>
-                    <button type="button" style={btnPrimary} onClick={() => setMobileView("chats")}>
-                      Chat
-                    </button>
-                    <button type="button" style={btn} onClick={() => setMobileView("search")}>
-                      Cerca utenti
-                    </button>
-                  </div>
-                </div>
-
-                {/* Non cambiamo altro: niente spostamenti, niente UI extra */}
-              </div>
-            ) : mobileView === "search" ? (
-              <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
-            ) : mobileView === "chats" ? (
-              <ConversationList
-                conversations={conversations}
-                selectedConversationId={selectedConversation?.id ?? null}
-                onSelect={(c) => {
-                  setSelectedConversation(c);
-                  setMobileView("chat");
-                }}
-              />
-            ) : (
-              // mobileView === "chat"
-              <ChatWindow
-                conversationId={selectedConversation?.id}
-                conversation={selectedConversation}
-                currentUser={user}
-                messages={messages}
-                onBack={() => setMobileView("chats")}
-              />
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  // =========================
-  // DESKTOP: INVARIATO
-  // =========================
-  return (
-    <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
-      {mobileView === "hub" ? <Sidebar /> : null}
-
-      <div style={{ flex: 1, minWidth: 0, display: "flex" }}>
-        <div
-          style={{
-            width: "clamp(360px, 34vw, 520px)",
-            borderRight: "1px solid #222",
-            minWidth: 0,
-            background: "var(--tiko-bg-gray)",
-            display: "flex",
-            flexDirection: "column",
-            minHeight: 0,
-          }}
-        >
-          <div style={{ borderBottom: "1px solid #222", background: "var(--tiko-bg-dark)", overflowY: "auto" }}>
-            {SearchBlock}
-          </div>
-
-          <div style={{ flex: 1, minHeight: 0 }}>
-            <ConversationList
-              conversations={conversations}
-              selectedConversationId={selectedConversation?.id ?? null}
-              onSelect={(c) => setSelectedConversation(c)}
-            />
-          </div>
-        </div>
-
-        <div style={{ flex: 1, minWidth: 0, minHeight: 0, display: "flex", flexDirection: "column" }}>
-          <ChatWindow conversationId={selectedConversation?.id} conversation={selectedConversation} currentUser={user} messages={messages} />
-        </div>
-      </div>
-    </div>
-  );
-}
+        {/* UNICA MODIFICA: su mobile la Sidebar non deve stringere le pagine dedicate */}
+        {mobileView === "hub" ? <Sidebar /> : null}
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
           {/* Header SOLO per le pagine dedicate Search/Chats */}
@@ -594,8 +465,6 @@ export default function HomePage() {
                     </button>
                   </div>
                 </div>
-
-                {/* Non cambiamo altro: niente spostamenti, niente UI extra */}
               </div>
             ) : mobileView === "search" ? (
               <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
@@ -609,7 +478,6 @@ export default function HomePage() {
                 }}
               />
             ) : (
-              // mobileView === "chat"
               <ChatWindow
                 conversationId={selectedConversation?.id}
                 conversation={selectedConversation}
