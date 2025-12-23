@@ -411,61 +411,92 @@ export default function HomePage() {
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
-  // =========================
-  // MOBILE: menù -> pagine dedicate (FULL SCREEN)
+   // =========================
+  // MOBILE: pagine dedicate FULL SCREEN
   // =========================
   if (isMobile) {
+    const headerTitle =
+      mobileView === "search" ? "Cerca utenti" : mobileView === "chats" ? "Chat" : mobileView === "chat" ? "Chat" : "";
+
+    const goBackFromHeader = () => {
+      // Se sei dentro una conversazione, torni alla lista chat
+      if (mobileView === "chat") setMobileView("chats");
+      // Se sei in search o chats, torni alla home mobile (hub)
+      else setMobileView("hub");
+    };
+
     return (
-      <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
-        {/* CRITICO: su mobile la sidebar NON deve schiacciare chat/search.
-            La mostriamo SOLO nel menù principale (hub). */}
+      <div
+        style={{
+          height: "100vh",
+          width: "100vw",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+          background: "var(--tiko-bg-dark)",
+        }}
+      >
+        {/* IMPORTANTE: per avere FULL SCREEN, la Sidebar la mostriamo SOLO nella Home (hub) */}
         {mobileView === "hub" ? <Sidebar /> : null}
 
-        <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          {mobileView === "search" ? (
-            <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", alignItems: "center", gap: 10 }}>
-              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
-                ←
-              </button>
-              <div style={{ fontWeight: 950 }}>Cerca utenti</div>
+        {/* Header con freccia SOLO sulle pagine dedicate (search/chats/chat) */}
+        {mobileView !== "hub" ? (
+          <div
+            style={{
+              padding: 10,
+              borderBottom: "1px solid #222",
+              background: "var(--tiko-bg-card)",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+            }}
+          >
+            <button type="button" style={headerBtn} onClick={goBackFromHeader} aria-label="Indietro">
+              ←
+            </button>
+
+            <div
+              style={{
+                fontWeight: 950,
+                flex: 1,
+                minWidth: 0,
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {headerTitle}
             </div>
-          ) : mobileView === "chats" ? (
-            <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", alignItems: "center", gap: 10 }}>
-              <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
-                ←
-              </button>
-              <div style={{ fontWeight: 950 }}>Chat</div>
-            </div>
-          ) : mobileView === "chat" ? (
-            <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", alignItems: "center", gap: 10 }}>
-              <button type="button" style={headerBtn} onClick={() => setMobileView("chats")} aria-label="Indietro">
-                ←
-              </button>
-              <div style={{ fontWeight: 950 }}>Chat</div>
+          </div>
+        ) : null}
+
+        {/* Contenuto mobile full screen */}
+        <div style={{ flex: 1, minHeight: 0, minWidth: 0, overflow: "hidden" }}>
+          {/* HOME MOBILE (hub): SOLO due pulsanti, niente search+chat insieme */}
+          {mobileView === "hub" ? (
+            <div style={{ padding: 14, height: "100%", overflowY: "auto" }}>
+              <div style={{ ...card }}>
+                <div style={{ fontWeight: 950, marginBottom: 10 }}>Cosa vuoi fare?</div>
+
+                <div style={{ display: "flex", gap: 10 }}>
+                  <button type="button" style={btnPrimary} onClick={() => setMobileView("chats")}>
+                    Chat
+                  </button>
+
+                  <button type="button" style={btn} onClick={() => setMobileView("search")}>
+                    Cerca utenti
+                  </button>
+                </div>
+              </div>
             </div>
           ) : null}
 
-          <div style={{ flex: 1, minHeight: 0 }}>
-            {mobileView === "hub" ? (
-              <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={card}>
-                  <div style={{ fontWeight: 950, marginBottom: 10 }}>Menu</div>
+          {/* PAGINA RICERCA: full screen */}
+          {mobileView === "search" ? <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div> : null}
 
-                  {/* IMPORTANTISSIMO: nel menù principale non mostriamo chat+ricerca insieme.
-                      Vai a pagina dedicata full-screen scegliendo cosa fare. */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    <button type="button" style={btnPrimary} onClick={() => setMobileView("chats")}>
-                      Chat
-                    </button>
-                    <button type="button" style={btn} onClick={() => setMobileView("search")}>
-                      Cerca utenti
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : mobileView === "search" ? (
-              <div style={{ height: "100%", overflowY: "auto" }}>{SearchBlock}</div>
-            ) : mobileView === "chats" ? (
+          {/* PAGINA CHAT LIST: full screen */}
+          {mobileView === "chats" ? (
+            <div style={{ height: "100%", overflowY: "auto" }}>
               <ConversationList
                 conversations={conversations}
                 selectedConversationId={selectedConversation?.id ?? null}
@@ -474,16 +505,19 @@ export default function HomePage() {
                   setMobileView("chat");
                 }}
               />
-            ) : (
-              <ChatWindow
-                conversationId={selectedConversation?.id}
-                conversation={selectedConversation}
-                currentUser={user}
-                messages={messages}
-                onBack={() => setMobileView("chats")}
-              />
-            )}
-          </div>
+            </div>
+          ) : null}
+
+          {/* PAGINA CHAT CONVERSAZIONE: full screen */}
+          {mobileView === "chat" ? (
+            <ChatWindow
+              conversationId={selectedConversation?.id}
+              conversation={selectedConversation}
+              currentUser={user}
+              messages={messages}
+              onBack={() => setMobileView("chats")}
+            />
+          ) : null}
         </div>
       </div>
     );
