@@ -1,22 +1,27 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import Sidebar from "../components/ui/Sidebar";
 import ConversationList from "../components/ui/ConversationList";
 import ChatWindow from "../components/ui/ChatWindow";
 import { useAuth } from "../AuthContext";
-import { fetchConversations, fetchMessages, searchUsers, sendFriendRequest } from "../api";
+import * as api from "../api";
 
 function useIsMobile(breakpointPx: number = 900) {
-  const detect = () => {
-    const mq = window.matchMedia ? window.matchMedia(`(max-width: ${breakpointPx}px)`).matches : window.innerWidth < breakpointPx;
-    const uaMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
-    const touch = "ontouchstart" in window || (navigator as any).maxTouchPoints > 0;
+  const calc = () => {
+    const mq = typeof window !== "undefined" && window.matchMedia
+      ? window.matchMedia(`(max-width: ${breakpointPx}px)`).matches
+      : typeof window !== "undefined"
+        ? window.innerWidth < breakpointPx
+        : false;
+    const uaMobile = typeof navigator !== "undefined" ? /Android|iPhone|iPad|iPod/i.test(navigator.userAgent) : false;
+    const touch = typeof navigator !== "undefined" ? ("ontouchstart" in window || (navigator as any).maxTouchPoints > 0) : false;
     return mq || (uaMobile && touch);
   };
 
-  const [isMobile, setIsMobile] = useState<boolean>(detect());
+  const [isMobile, setIsMobile] = useState<boolean>(calc());
 
   useEffect(() => {
-    const onResize = () => setIsMobile(detect());
+    const onResize = () => setIsMobile(calc());
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, [breakpointPx]);
@@ -26,8 +31,8 @@ function useIsMobile(breakpointPx: number = 900) {
 
 type UserLite = {
   id: number;
-  username?: string;
-  displayName?: string;
+  username?: string | null;
+  displayName?: string | null;
   city?: string | null;
   area?: string | null;
   mood?: string | null;
@@ -56,24 +61,45 @@ const MOOD_OPTIONS = [
   { value: "SOLO", label: "Solo" },
 ];
 
-function stateLabel(v?: string | null) {
-  const f = STATE_OPTIONS.find((o) => o.value === v);
-  return f ? f.label : v || "";
+function safeArr<T = any>(v: any): T[] {
+  if (Array.isArray(v)) return v;
+  if (Array.isArray(v?.data)) return v.data;
+  if (Array.isArray(v?.items)) return v.items;
+  return [];
 }
-function moodLabel(v?: string | null) {
-  const f = MOOD_OPTIONS.find((o) => o.value === v);
-  return f ? f.label : v || "";
+
+function getOtherUserId(conversation: any, myId: number): number | null {
+  const candidates = [
+    ...(Array.isArray(conversation?.participants) ? conversation.participants : []),
+    ...(Array.isArray(conversation?.users) ? conversation.users : []),
+    ...(Array.isArray(conversation?.members) ? conversation.members : []),
+  ].filter(Boolean);
+
+  for (const u of candidates) {
+    const id = Number(u?.id);
+    if (id && id !== myId) return id;
+  }
+
+  const otherId = Number(conversation?.otherUserId || 0);
+  if (otherId && otherId !== myId) return otherId;
+
+  const otherUser = conversation?.otherUser;
+  const otherUserId2 = Number(otherUser?.id || 0);
+  if (otherUserId2 && otherUserId2 !== myId) return otherUserId2;
+
+  return null;
 }
 
 export default function HomePage() {
   const { user } = useAuth();
   const isMobile = useIsMobile(900);
+  const location = useLocation();
 
   const [conversations, setConversations] = useState<any[]>([]);
   const [selectedConversation, setSelectedConversation] = useState<any | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
 
-  // SOLO MOBILE: pagine dedicate (hub -> search / chats / chat)
+  // MOBILE: menù principale -> pagine dedicate
   const [mobileView, setMobileView] = useState<"hub" | "search" | "chats" | "chat">("hub");
 
   // Ricerca utenti
@@ -131,13 +157,15 @@ export default function HomePage() {
     fontWeight: 950,
   };
 
+  // Carico conversazioni
   useEffect(() => {
     if (!user) return;
     (async () => {
       try {
-        const list = await fetchConversations();
-        setConversations(list);
-        if (!selectedConversation && list.length > 0) setSelectedConversation(list[0]);
+        const list = await (api as any).fetchConversations?.();
+        const arr = safeArr(list);
+        setConversations(arr);
+        if (!selectedConversation && arr.length > 0) setSelectedConversation(arr[0]);
       } catch {
         // silent
       }
@@ -145,19 +173,44 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
+  // Se arrivo con ?cid= oppure ?uid= (da amici), apro direttamente la chat
+  useEffect(() => {
+    if (!user) return;
+    if (!conversations.length) return;
+
+    const params = new URLSearchParams(location.search);
+    const cid = Number(params.get("cid") || 0);
+    const uid = Number(params.get("uid") || 0);
+
+    let target: any | null = null;
+
+    if (cid) {
+      target = conversations.find((c) => Number((c as any)?.id) === cid) ?? null;
+    } else if (uid) {
+      target =
+        conversations.find((c) => getOtherUserId(c, Number(user.id)) === uid) ?? null;
+    }
+
+    if (target) {
+      setSelectedConversation(target);
+      if (isMobile) setMobileView("chat");
+    }
+  }, [location.search, conversations, isMobile, user]);
+
+  // Carico messaggi conversazione selezionata
   useEffect(() => {
     if (!selectedConversation) return;
     (async () => {
       try {
-        const list = await fetchMessages(selectedConversation.id);
-        setMessages(list as any);
+        const list = await (api as any).fetchMessages?.(selectedConversation.id);
+        setMessages(safeArr(list));
       } catch {
         // silent
       }
     })();
   }, [selectedConversation?.id]);
 
-  // Live polling: ogni 2s SOLO quando sei nella pagina chat (mobile) o sempre (desktop)
+  // Poll leggero (2s) per evitare refresh manuale quando il realtime non si aggancia
   useEffect(() => {
     if (!user) return;
     const convId = Number(selectedConversation?.id || 0);
@@ -173,9 +226,9 @@ export default function HomePage() {
       if (inFlight) return;
       inFlight = true;
       try {
-        const list = await fetchMessages(convId);
+        const list = await (api as any).fetchMessages?.(convId);
         if (!alive) return;
-        setMessages(list as any);
+        setMessages(safeArr(list));
       } catch {
         // silent
       } finally {
@@ -186,15 +239,9 @@ export default function HomePage() {
     tick();
     const t = window.setInterval(tick, 2000);
 
-    const onVis = () => {
-      if (document.visibilityState === "visible") tick();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
     return () => {
       alive = false;
       window.clearInterval(t);
-      document.removeEventListener("visibilitychange", onVis);
     };
   }, [user?.id, selectedConversation?.id, isMobile, mobileView]);
 
@@ -208,7 +255,6 @@ export default function HomePage() {
 
     try {
       const hasAny = q.trim() || city.trim() || area.trim() || mood || state || visibleOnly;
-
       if (!hasAny) {
         setSearchInfo("Inserisci almeno un filtro (anche solo “Visibile a tutti”).");
         return;
@@ -223,10 +269,10 @@ export default function HomePage() {
         visibleOnly: visibleOnly || undefined,
       };
 
-      const list = await (searchUsers as any)(params);
-      const filtered = (list || []).filter((u: any) => u?.id !== user.id);
-      setResults(filtered);
-      if (filtered.length === 0) setSearchInfo("Nessun utente trovato.");
+      const list = await (api as any).searchUsers?.(params);
+      const arr = safeArr<UserLite>(list).filter((u) => Number(u?.id) !== Number(user.id));
+      setResults(arr);
+      if (arr.length === 0) setSearchInfo("Nessun utente trovato.");
     } catch (e: any) {
       setSearchErr(e?.message || "Errore ricerca utenti");
     } finally {
@@ -238,7 +284,7 @@ export default function HomePage() {
     setSearchErr(null);
     setSearchInfo(null);
     try {
-      await sendFriendRequest(userId);
+      await (api as any).sendFriendRequest?.(userId);
       setSentRequestIds((prev) => new Set(prev).add(userId));
       setSearchInfo("Richiesta inviata.");
     } catch (e: any) {
@@ -264,7 +310,7 @@ export default function HomePage() {
         <div style={card}>
           <div style={{ fontWeight: 950, marginBottom: 10 }}>Ricerca utenti</div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 10 }}>
             <input style={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Nome o username" />
             <input style={input} value={city} onChange={(e) => setCity(e.target.value)} placeholder="Città" />
             <input style={input} value={area} onChange={(e) => setArea(e.target.value)} placeholder="Zona / Area" />
@@ -286,21 +332,12 @@ export default function HomePage() {
             </select>
           </div>
 
-          <label
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 10,
-              marginTop: 10,
-              color: "var(--tiko-text-dim)",
-              fontSize: 13,
-            }}
-          >
+          <label style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10, color: "var(--tiko-text-dim)", fontSize: 13 }}>
             <input type="checkbox" checked={visibleOnly} onChange={(e) => setVisibleOnly(e.target.checked)} />
             Solo “Visibile a tutti”
           </label>
 
-          <div style={{ display: "flex", gap: 10, marginTop: 10 }}>
+          <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
             <button type="button" style={btnPrimary} onClick={doSearch} disabled={searching}>
               {searching ? "Ricerca..." : "Cerca"}
             </button>
@@ -310,32 +347,13 @@ export default function HomePage() {
           </div>
 
           {searchErr && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid #3a1f1f",
-                background: "rgba(255,59,48,0.08)",
-                color: "#ff6b6b",
-                fontWeight: 900,
-              }}
-            >
+            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 900 }}>
               {searchErr}
             </div>
           )}
 
           {searchInfo && (
-            <div
-              style={{
-                marginTop: 10,
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px solid #2a2a2a",
-                color: "var(--tiko-text)",
-                fontWeight: 900,
-              }}
-            >
+            <div style={{ marginTop: 10, padding: "10px 12px", borderRadius: 12, border: "1px solid #2a2a2a", color: "var(--tiko-text)", fontWeight: 900 }}>
               {searchInfo}
             </div>
           )}
@@ -367,8 +385,8 @@ export default function HomePage() {
                       </div>
                       <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
                         {[u.city, u.area].filter(Boolean).join(" • ")}
-                        {u.mood ? ` • Mood: ${moodLabel(u.mood)}` : ""}
-                        {u.state ? ` • Stato: ${stateLabel(u.state)}` : ""}
+                        {u.mood ? ` • Mood: ${u.mood}` : ""}
+                        {u.state ? ` • Stato: ${u.state}` : ""}
                       </div>
                     </div>
 
@@ -389,61 +407,38 @@ export default function HomePage() {
         )}
       </div>
     );
-  }, [
-    q,
-    city,
-    area,
-    mood,
-    state,
-    visibleOnly,
-    results,
-    searching,
-    searchErr,
-    searchInfo,
-    sentRequestIds,
-  ]);
+  }, [area, btn, btnPrimary, card, city, doSearch, input, isMobile, mood, q, resetSearch, results, searching, searchErr, searchInfo, sentRequestIds, state, visibleOnly]);
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
   // =========================
-  // MOBILE: pagine dedicate
+  // MOBILE: menù -> pagine dedicate (FULL SCREEN)
   // =========================
   if (isMobile) {
     return (
       <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
-        {/* UNICA MODIFICA: su mobile la Sidebar non deve stringere le pagine dedicate */}
+        {/* CRITICO: su mobile la sidebar NON deve schiacciare chat/search.
+            La mostriamo SOLO nel menù principale (hub). */}
         {mobileView === "hub" ? <Sidebar /> : null}
 
         <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column" }}>
-          {/* Header SOLO per le pagine dedicate Search/Chats */}
           {mobileView === "search" ? (
-            <div
-              style={{
-                padding: 10,
-                borderBottom: "1px solid #222",
-                background: "var(--tiko-bg-card)",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
+            <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", alignItems: "center", gap: 10 }}>
               <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
                 ←
               </button>
               <div style={{ fontWeight: 950 }}>Cerca utenti</div>
             </div>
           ) : mobileView === "chats" ? (
-            <div
-              style={{
-                padding: 10,
-                borderBottom: "1px solid #222",
-                background: "var(--tiko-bg-card)",
-                display: "flex",
-                alignItems: "center",
-                gap: 10,
-              }}
-            >
+            <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", alignItems: "center", gap: 10 }}>
               <button type="button" style={headerBtn} onClick={() => setMobileView("hub")} aria-label="Indietro">
+                ←
+              </button>
+              <div style={{ fontWeight: 950 }}>Chat</div>
+            </div>
+          ) : mobileView === "chat" ? (
+            <div style={{ padding: 10, borderBottom: "1px solid #222", background: "var(--tiko-bg-card)", display: "flex", alignItems: "center", gap: 10 }}>
+              <button type="button" style={headerBtn} onClick={() => setMobileView("chats")} aria-label="Indietro">
                 ←
               </button>
               <div style={{ fontWeight: 950 }}>Chat</div>
@@ -451,12 +446,14 @@ export default function HomePage() {
           ) : null}
 
           <div style={{ flex: 1, minHeight: 0 }}>
-            {/* HUB: comandi Chat / Ricerca -> pagine dedicate */}
             {mobileView === "hub" ? (
               <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-                <div style={{ ...card }}>
-                  <div style={{ fontWeight: 950, marginBottom: 10 }}>Cosa vuoi fare?</div>
-                  <div style={{ display: "flex", gap: 10 }}>
+                <div style={card}>
+                  <div style={{ fontWeight: 950, marginBottom: 10 }}>Menu</div>
+
+                  {/* IMPORTANTISSIMO: nel menù principale non mostriamo chat+ricerca insieme.
+                      Vai a pagina dedicata full-screen scegliendo cosa fare. */}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <button type="button" style={btnPrimary} onClick={() => setMobileView("chats")}>
                       Chat
                     </button>
@@ -493,7 +490,7 @@ export default function HomePage() {
   }
 
   // =========================
-  // DESKTOP: INVARIATO
+  // DESKTOP: INVARIATO (2 colonne + chat)
   // =========================
   return (
     <div style={{ height: "100vh", display: "flex", overflow: "hidden", background: "var(--tiko-bg-dark)" }}>
@@ -511,16 +508,10 @@ export default function HomePage() {
             minHeight: 0,
           }}
         >
-          <div style={{ borderBottom: "1px solid #222", background: "var(--tiko-bg-dark)", overflowY: "auto" }}>
-            {SearchBlock}
-          </div>
+          <div style={{ borderBottom: "1px solid #222", background: "var(--tiko-bg-dark)", overflowY: "auto" }}>{SearchBlock}</div>
 
           <div style={{ flex: 1, minHeight: 0 }}>
-            <ConversationList
-              conversations={conversations}
-              selectedConversationId={selectedConversation?.id ?? null}
-              onSelect={(c) => setSelectedConversation(c)}
-            />
+            <ConversationList conversations={conversations} selectedConversationId={selectedConversation?.id ?? null} onSelect={(c) => setSelectedConversation(c)} />
           </div>
         </div>
 

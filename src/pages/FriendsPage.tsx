@@ -1,44 +1,47 @@
 import React, { useEffect, useState } from "react";
-import {
-  fetchFriends,
-  fetchFriendRequestsReceived,
-  fetchFriendRequestsSent,
-  acceptFriendRequest,
-  declineFriendRequest,
-} from "../api";
-import { useAuth } from "../AuthContext";
 import { useNavigate } from "react-router-dom";
+import { useAuth } from "../AuthContext";
+import { API_BASE_URL } from "../config";
+
+type UserLite = {
+  id: number;
+  username?: string | null;
+  displayName?: string | null;
+  avatarUrl?: string | null;
+  state?: string | null;
+  mood?: string | null;
+  city?: string | null;
+  area?: string | null;
+};
+
+function getToken(): string {
+  return (
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("jwt") ||
+    ""
+  );
+}
+
+async function apiGet(path: string) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    const txt = await res.text().catch(() => "");
+    throw new Error(txt || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
 
 export default function FriendsPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const [friends, setFriends] = useState<any[]>([]);
-  const [incoming, setIncoming] = useState<any[]>([]);
-  const [outgoing, setOutgoing] = useState<any[]>([]);
+  const [friends, setFriends] = useState<UserLite[]>([]);
   const [err, setErr] = useState<string | null>(null);
-
-  async function loadAll() {
-    if (!user) return;
-    setErr(null);
-    try {
-      const [f, inc, out] = await Promise.all([
-        fetchFriends(),
-        fetchFriendRequestsReceived(),
-        fetchFriendRequestsSent(),
-      ]);
-      setFriends(Array.isArray(f) ? f : []);
-      setIncoming(Array.isArray(inc) ? inc : []);
-      setOutgoing(Array.isArray(out) ? out : []);
-    } catch (e: any) {
-      setErr(e?.message || "Errore caricamento amici");
-    }
-  }
-
-  useEffect(() => {
-    void loadAll();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  const [loading, setLoading] = useState(false);
 
   const card: React.CSSProperties = {
     background: "var(--tiko-bg-card)",
@@ -47,158 +50,74 @@ export default function FriendsPage() {
     padding: 12,
   };
 
-  const btn: React.CSSProperties = {
-    padding: "10px 12px",
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "transparent",
-    cursor: "pointer",
-    fontWeight: 900,
-    color: "var(--tiko-text)",
-  };
+  useEffect(() => {
+    if (!user) return;
+    (async () => {
+      setErr(null);
+      setLoading(true);
+      try {
+        const data = await apiGet("/friends");
+        const arr = Array.isArray(data) ? data : Array.isArray(data?.friends) ? data.friends : [];
+        setFriends(arr);
+      } catch (e: any) {
+        setErr(e?.message || "Errore caricamento amici");
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [user?.id]);
 
-  const btnPrimary: React.CSSProperties = {
-    ...btn,
-    background: "var(--tiko-mint)",
-    color: "#000",
-    borderColor: "var(--tiko-mint)",
-  };
-
-  const btnDanger: React.CSSProperties = {
-    ...btn,
-    borderColor: "#ff6b6b",
-    color: "#ff6b6b",
-  };
-
-  const headerBtn: React.CSSProperties = {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    border: "1px solid #2a2a2a",
-    background: "var(--tiko-bg-dark)",
-    color: "var(--tiko-text)",
-    fontWeight: 950,
-    cursor: "pointer",
-  };
+  function openChatWithFriend(friendId: number) {
+    // Apriamo Home già filtrata su quell’amico.
+    // HomePage seleziona la conversazione (se esiste) e su mobile apre direttamente la pagina chat.
+    navigate(`/?uid=${friendId}`);
+  }
 
   if (!user) return <div style={{ padding: 14 }}>Non loggato</div>;
 
   return (
     <div style={{ padding: 14, display: "flex", flexDirection: "column", gap: 12 }}>
-      {/* Header con freccia indietro */}
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <button
-          type="button"
-          style={headerBtn}
-          onClick={() => {
-            try {
-              navigate(-1);
-            } catch {
-              navigate("/");
-            }
-          }}
-          aria-label="Indietro"
-          title="Indietro"
-        >
-          ←
-        </button>
-        <h2 style={{ margin: 0 }}>Amici</h2>
-      </div>
+      <div style={{ fontWeight: 950, fontSize: 18 }}>Amici</div>
 
       {err && (
-        <div style={{ ...card, borderColor: "#ff6b6b", color: "#ff6b6b", fontWeight: 900 }}>
+        <div style={{ padding: 12, borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 900 }}>
           {err}
         </div>
       )}
 
       <div style={card}>
-        <div style={{ fontWeight: 950, marginBottom: 10 }}>Richieste ricevute</div>
-        {incoming.length === 0 ? (
-          <div style={{ color: "var(--tiko-text-dim)" }}>Nessuna richiesta.</div>
+        <div style={{ fontWeight: 950, marginBottom: 10 }}>{loading ? "Caricamento..." : "Lista amici"}</div>
+
+        {friends.length === 0 && !loading ? (
+          <div style={{ color: "var(--tiko-text-dim)" }}>Nessun amico trovato.</div>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {incoming.map((r: any) => (
-              <div
-                key={r.id}
+            {friends.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                onClick={() => openChatWithFriend(Number(f.id))}
                 style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  alignItems: "center",
-                  gap: 10,
+                  textAlign: "left",
+                  cursor: "pointer",
                   padding: 10,
-                  border: "1px solid #232323",
                   borderRadius: 12,
+                  border: "1px solid #232323",
+                  background: "transparent",
+                  color: "var(--tiko-text)",
                 }}
+                title="Apri chat"
               >
                 <div style={{ fontWeight: 950 }}>
-                  {r.sender?.displayName || r.sender?.username || "Utente"}
-                  {r.sender?.username ? <span style={{ color: "var(--tiko-text-dim)" }}> @{r.sender.username}</span> : null}
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button
-                    type="button"
-                    style={btnPrimary}
-                    onClick={async () => {
-                      await acceptFriendRequest(r.id);
-                      await loadAll();
-                    }}
-                  >
-                    Accetta
-                  </button>
-                  <button
-                    type="button"
-                    style={btnDanger}
-                    onClick={async () => {
-                      await declineFriendRequest(r.id);
-                      await loadAll();
-                    }}
-                  >
-                    Rifiuta
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={card}>
-        <div style={{ fontWeight: 950, marginBottom: 10 }}>Richieste inviate</div>
-        {outgoing.length === 0 ? (
-          <div style={{ color: "var(--tiko-text-dim)" }}>Nessuna richiesta inviata.</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {outgoing.map((r: any) => (
-              <div key={r.id} style={{ padding: 10, border: "1px solid #232323", borderRadius: 12 }}>
-                <div style={{ fontWeight: 950 }}>
-                  {r.receiver?.displayName || r.receiver?.username || "Utente"}
-                  {r.receiver?.username ? <span style={{ color: "var(--tiko-text-dim)" }}> @{r.receiver.username}</span> : null}
-                </div>
-                <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>In attesa…</div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div style={card}>
-        <div style={{ fontWeight: 950, marginBottom: 10 }}>I tuoi amici</div>
-        {friends.length === 0 ? (
-          <div style={{ color: "var(--tiko-text-dim)" }}>Nessun amico.</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {friends.map((f: any) => (
-              <div key={f.id} style={{ padding: 10, border: "1px solid #232323", borderRadius: 12 }}>
-                <div style={{ fontWeight: 950 }}>
-                  {f.displayName || f.username}
-                  {f.username ? <span style={{ color: "var(--tiko-text-dim)" }}> @{f.username}</span> : null}
+                  {f.displayName || f.username || "Utente"}{" "}
+                  {f.username ? <span style={{ color: "var(--tiko-text-dim)" }}>@{f.username}</span> : null}
                 </div>
                 <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
                   {[f.city, f.area].filter(Boolean).join(" • ")}
-                  {f.mood ? ` • Mood: ${f.mood}` : ""}
                   {f.state ? ` • Stato: ${f.state}` : ""}
+                  {f.mood ? ` • Mood: ${f.mood}` : ""}
                 </div>
-              </div>
+              </button>
             ))}
           </div>
         )}
