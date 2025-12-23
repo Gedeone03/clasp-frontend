@@ -415,7 +415,8 @@ export default function ChatWindow({
             Invia
           </button>
 
-          {/* File input nascosto: IMPORTANTISSIMO accept="*/*" così su mobile compaiono anche documenti */}
+         {/* File input nascosto: accept=ALL (documenti inclusi su mobile) */}
+
           <input
             ref={fileInputRef}
             type="file"
