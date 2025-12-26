@@ -6,16 +6,11 @@ type AnyMessage = any;
 type AnyConversation = any;
 
 function getToken(): string {
-  return (
-    localStorage.getItem("authToken") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("jwt") ||
-    ""
-  );
+  return localStorage.getItem("authToken") || localStorage.getItem("token") || localStorage.getItem("jwt") || "";
 }
 
 function isImageUrl(s: string) {
-  return /\.(png|jpg|jpeg|gif|webp)$/i.test(s) || s.includes("/uploads/") && /image/i.test(s);
+  return /\.(png|jpg|jpeg|gif|webp)$/i.test(s) || (s.includes("/uploads/") && /image/i.test(s));
 }
 
 function parseTaggedContent(content: string) {
@@ -90,6 +85,24 @@ async function sendMessage(conversationId: number, content: string, replyToId?: 
   return res.json();
 }
 
+function isIOS(): boolean {
+  try {
+    const ua = navigator.userAgent || "";
+    return /iPhone|iPad|iPod/i.test(ua);
+  } catch {
+    return false;
+  }
+}
+
+function canUseMediaRecorder(): boolean {
+  // Safari iOS: spesso instabile -> usiamo capture input
+  if (isIOS()) return false;
+  if (typeof window === "undefined") return false;
+  if (!navigator.mediaDevices?.getUserMedia) return false;
+  if (typeof (window as any).MediaRecorder === "undefined") return false;
+  return true;
+}
+
 export default function ChatWindow({
   conversationId,
   conversation,
@@ -114,6 +127,10 @@ export default function ChatWindow({
   const chunksRef = useRef<BlobPart[]>([]);
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // INPUT NASCOSTO per iOS / fallback microfono (file audio registrato dal dispositivo)
+  const voiceInputRef = useRef<HTMLInputElement | null>(null);
+
   const listRef = useRef<HTMLDivElement | null>(null);
 
   const sorted = useMemo(() => {
@@ -194,7 +211,29 @@ export default function ChatWindow({
     }
   }
 
-  async function startRecording() {
+  async function handleVoiceSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f) return;
+
+    if (!convId) {
+      setErr("ConversationId mancante: non posso inviare vocale.");
+      return;
+    }
+
+    setErr(null);
+    setBusy(true);
+    try {
+      const url = await uploadTo("/upload/audio", f);
+      await sendMessage(convId, `[audio] ${url}`, null);
+    } catch (e2: any) {
+      setErr(e2?.message || "Errore invio vocale");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function startRecordingMediaRecorder() {
     if (recording) return;
     if (!navigator.mediaDevices?.getUserMedia) {
       setErr("Microfono non supportato su questo dispositivo/browser.");
@@ -208,12 +247,15 @@ export default function ChatWindow({
 
       // scegliamo un mimeType supportato
       const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/ogg"];
-      const mimeType = candidates.find((t) => (window as any).MediaRecorder?.isTypeSupported?.(t)) || "";
+      const MR: any = (window as any).MediaRecorder;
+      const mimeType =
+        candidates.find((t) => MR?.isTypeSupported?.(t)) ||
+        ""; // se vuoto lasciamo che scelga il browser
 
-      const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined);
+      const mr = new MR(stream, mimeType ? { mimeType } : undefined);
       chunksRef.current = [];
 
-      mr.ondataavailable = (ev) => {
+      mr.ondataavailable = (ev: any) => {
         if (ev.data && ev.data.size > 0) chunksRef.current.push(ev.data);
       };
 
@@ -223,7 +265,7 @@ export default function ChatWindow({
           chunksRef.current = [];
 
           // stop stream tracks
-          stream.getTracks().forEach((t) => t.stop());
+          stream.getTracks().forEach((t: any) => t.stop());
 
           if (!convId) return;
 
@@ -258,6 +300,31 @@ export default function ChatWindow({
     } catch {
       // ignore
     }
+  }
+
+  function handleMicClick() {
+    if (busy) return;
+
+    if (!convId) {
+      setErr("ConversationId mancante: non posso inviare vocale.");
+      return;
+    }
+
+    // se stiamo registrando con MediaRecorder → stop e invia
+    if (recording) {
+      stopRecording();
+      return;
+    }
+
+    // iOS / browser senza MediaRecorder → apri capture input (registratore nativo)
+    if (!canUseMediaRecorder()) {
+      setErr(null);
+      voiceInputRef.current?.click();
+      return;
+    }
+
+    // Android/Chrome ecc → MediaRecorder
+    startRecordingMediaRecorder();
   }
 
   const header: React.CSSProperties = {
@@ -306,7 +373,10 @@ export default function ChatWindow({
         </div>
       </div>
 
-      <div ref={listRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}>
+      <div
+        ref={listRef}
+        style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: 12, display: "flex", flexDirection: "column", gap: 10 }}
+      >
         {sorted.map((m) => {
           const mine = Number(m?.senderId) === Number(currentUser?.id);
           const content = String(m?.content || "");
@@ -333,9 +403,27 @@ export default function ChatWindow({
       </div>
 
       {/* Barra chat (ripristinata): file + microfono + invio */}
-      <div style={{ padding: 10, borderTop: "1px solid #222", background: "var(--tiko-bg-gray)", display: "flex", flexDirection: "column", gap: 8 }}>
+      <div
+        style={{
+          padding: 10,
+          borderTop: "1px solid #222",
+          background: "var(--tiko-bg-gray)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+        }}
+      >
         {err ? (
-          <div style={{ padding: "10px 12px", borderRadius: 12, border: "1px solid #3a1f1f", background: "rgba(255,59,48,0.08)", color: "#ff6b6b", fontWeight: 900 }}>
+          <div
+            style={{
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #3a1f1f",
+              background: "rgba(255,59,48,0.08)",
+              color: "#ff6b6b",
+              fontWeight: 900,
+            }}
+          >
             {err}
           </div>
         ) : null}
@@ -363,7 +451,7 @@ export default function ChatWindow({
 
           <button
             type="button"
-            onClick={() => (recording ? stopRecording() : startRecording())}
+            onClick={handleMicClick}
             disabled={busy}
             style={{
               width: 42,
@@ -415,18 +503,24 @@ export default function ChatWindow({
             Invia
           </button>
 
-         {/* File input nascosto: accept=ALL (documenti inclusi su mobile) */}
+          {/* File input nascosto: documenti inclusi su mobile */}
+          <input ref={fileInputRef} type="file" accept="*/*" style={{ display: "none" }} onChange={handleFileSelected} />
 
+          {/* Voice input nascosto per iOS/fallback */}
           <input
-            ref={fileInputRef}
+            ref={voiceInputRef}
             type="file"
-            accept="*/*"
+            accept="audio/*"
+            // NOTE: per compatibilità TS/React usiamo spread
+            {...({ capture: "microphone" } as any)}
             style={{ display: "none" }}
-            onChange={handleFileSelected}
+            onChange={handleVoiceSelected}
           />
         </div>
 
-        {recording ? <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>Registrazione in corso… premi il microfono per inviare.</div> : null}
+        {recording ? (
+          <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>Registrazione in corso… premi il microfono per inviare.</div>
+        ) : null}
       </div>
     </div>
   );
