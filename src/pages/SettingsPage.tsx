@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import Sidebar from "../components/ui/Sidebar";
 import { unlockAudio, playNotificationBeep } from "../utils/notifySound";
+import { useI18n } from "../LanguageContext";
 
 function useIsMobile(breakpointPx = 1100) {
   const compute = () => {
@@ -9,8 +10,7 @@ function useIsMobile(breakpointPx = 1100) {
       typeof window.matchMedia === "function" &&
       window.matchMedia("(pointer: coarse)").matches;
 
-    const ua =
-      typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
+    const ua = typeof navigator !== "undefined" ? navigator.userAgent || "" : "";
     const uaMobile = /Mobi|Android|iPhone|iPad|iPod/i.test(ua);
 
     return coarse || uaMobile || window.innerWidth < breakpointPx;
@@ -33,10 +33,70 @@ function readSoundEnabled(): boolean {
   return v !== "false"; // default ON
 }
 
+type Lang = "it" | "en";
+
+function normalizeLang(v: string | null | undefined): Lang {
+  const s = (v || "").toLowerCase().trim();
+  return s.startsWith("en") ? "en" : "it";
+}
+
+function readLangFromStorage(): Lang {
+  // leggiamo più chiavi per compatibilità
+  const v =
+    localStorage.getItem("clasp.lang") ||
+    localStorage.getItem("clasp_lang") ||
+    localStorage.getItem("lang") ||
+    localStorage.getItem("language") ||
+    "it";
+  return normalizeLang(v);
+}
+
 export default function SettingsPage() {
   const isMobile = useIsMobile(1100);
   const [soundEnabled, setSoundEnabled] = useState<boolean>(readSoundEnabled());
   const [msg, setMsg] = useState<string | null>(null);
+
+  // ===== i18n / lingua =====
+  const i18n: any = useI18n();
+  const [lang, setLang] = useState<Lang>(() => {
+    const fromCtx = normalizeLang(i18n?.lang || i18n?.language || i18n?.locale);
+    // se il context non è inizializzato, ripieghiamo su storage
+    return fromCtx !== "it" ? "en" : readLangFromStorage();
+  });
+
+  // Sync se il provider espone la lingua e cambia
+  React.useEffect(() => {
+    const fromCtx = normalizeLang(i18n?.lang || i18n?.language || i18n?.locale);
+    if (fromCtx !== lang) {
+      // se la lingua nel context è esplicita, allineiamo lo stato locale
+      if ((i18n?.lang || i18n?.language || i18n?.locale) != null) setLang(fromCtx);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [i18n?.lang, i18n?.language, i18n?.locale]);
+
+  function applyLang(next: Lang) {
+    setLang(next);
+
+    // Persistenza (compatibile con più versioni del progetto)
+    try {
+      localStorage.setItem("clasp.lang", next);
+      localStorage.setItem("clasp_lang", next);
+      localStorage.setItem("lang", next);
+      localStorage.setItem("language", next);
+    } catch {}
+
+    // Se esiste un setter nel provider, usiamolo (senza reload)
+    const setFn = i18n?.setLang || i18n?.setLanguage || i18n?.setLocale;
+    if (typeof setFn === "function") {
+      setFn(next);
+      return;
+    }
+
+    // Fallback: ricarica per applicare la lingua
+    window.location.reload();
+  }
+
+  const toggleLang = () => applyLang(lang === "it" ? "en" : "it");
 
   const containerStyle: React.CSSProperties = useMemo(
     () => ({
@@ -126,6 +186,37 @@ export default function SettingsPage() {
             </div>
 
             {msg && <div style={{ marginTop: 10, fontSize: 12, color: "var(--tiko-text-dim)" }}>{msg}</div>}
+          </div>
+
+          {/* ===== Lingua ===== */}
+          <div style={cardStyle}>
+            <div style={{ fontWeight: 950, marginBottom: 8 }}>Lingua</div>
+
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={{ fontWeight: 900 }}>Lingua app</div>
+                <div style={{ fontSize: 12, color: "var(--tiko-text-dim)" }}>
+                  Attuale: <strong style={{ color: "var(--tiko-text)" }}>{lang === "it" ? "Italiano" : "English"}</strong>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleLang}
+                style={{
+                  borderRadius: 12,
+                  padding: "10px 12px",
+                  border: "1px solid #2a2a2a",
+                  background: "var(--tiko-mint)",
+                  color: "#000",
+                  fontWeight: 950,
+                  cursor: "pointer",
+                }}
+                aria-label="Cambia lingua"
+              >
+                {lang === "it" ? "Passa a English" : "Passa a Italiano"}
+              </button>
+            </div>
           </div>
 
           <div style={cardStyle}>
